@@ -103,9 +103,10 @@ def main() -> None:
 
     batches = list(make_batches(split_docs, EMBED_BATCH_SIZE))
     print(f"Embedding {len(split_docs)} chunks in batches of {EMBED_BATCH_SIZE}...")
+    stored_so_far = 0
     for i, batch in enumerate(batches):
         inserted_ids = vectorStore.add_documents(batch)
-        stored_so_far = sum(len(b) for b in batches[: i + 1])
+        stored_so_far += len(batch)
         print(f"  stored {len(inserted_ids)} ids ({stored_so_far}/{len(split_docs)})")
         if i + 1 < len(batches):
             time.sleep(EMBED_BATCH_SLEEP_SECONDS)

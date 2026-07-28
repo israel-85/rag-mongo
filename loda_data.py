@@ -38,7 +38,6 @@ TAG_PROMPT = (
     "Set hasCode to true only if the page contains code or shell commands.\n\n"
 )
 
-
 def filter_pages(pages: list[Document]) -> list[Document]:
     """Drop pages with 20 or fewer words (front matter/noise)."""
     return [page for page in pages if len(page.page_content.split()) > 20]
@@ -113,7 +112,6 @@ def main() -> None:
 
     print(f"Done. {collection.count_documents({})} documents in {DB_NAME}.{COLLECTION_NAME}")
     client.close()
-
 
 if __name__ == "__main__":
     main()

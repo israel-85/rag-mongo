@@ -90,8 +90,8 @@ vectorStore = MongoDBAtlasVectorSearch(collection=collection, embedding=embeddin
 print(f"Embedding {len(split_docs)} chunks in batches of {EMBED_BATCH_SIZE}...")
 for start in range(0, len(split_docs), EMBED_BATCH_SIZE):
     batch = split_docs[start : start + EMBED_BATCH_SIZE]
-    vectorStore.add_documents(batch)
-    print(f"  stored {start + len(batch)}/{len(split_docs)}")
+    inserted_ids = vectorStore.add_documents(batch)
+    print(f"  stored {len(inserted_ids)} ids (batch {start + 1}-{start + len(batch)})/{len(split_docs)}")
     if start + EMBED_BATCH_SIZE < len(split_docs):
         time.sleep(EMBED_BATCH_SLEEP_SECONDS)
 

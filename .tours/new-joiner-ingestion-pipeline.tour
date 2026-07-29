@@ -18,25 +18,25 @@
     },
     {
       "file": "loda_data.py",
-      "line": 41,
+      "line": 39,
       "title": "Stage 1: Filter Noise Pages",
       "description": "Situation: raw PDF pages come in via PyPDFLoader, many are front matter or noise. Mechanism: filter_pages drops any page with 20 or fewer words. Implication: this is the cheapest filter in the pipeline - runs before the expensive LLM tagging step. Gotcha: threshold is a strict > 20, not >=, so a 20-word page is dropped (see the test at line 7 of test_loda_data.py)."
     },
     {
       "file": "loda_data.py",
-      "line": 24,
+      "line": 22,
       "title": "The Tagging Schema",
       "description": "Situation: this JSON schema defines what metadata gets extracted per page - title, keywords, hasCode. Mechanism: passed to ChatOpenAI.with_structured_output(schema, method=\"json_schema\") at line 89. Implication: json_schema method is used (not function/tool calling) because the local LM Studio server only supports the former. Gotcha: if you add a field here, also update merge_tags's consumers - it only merges keys that exist in schema[\"properties\"]."
     },
     {
       "file": "loda_data.py",
-      "line": 54,
+      "line": 52,
       "title": "Stage 2: LLM Tagging, Fails Soft",
       "description": "Situation: tag_page calls the LLM tagger on a single page's content. Mechanism: on any exception it prints a warning and returns the original untagged page instead of raising. Implication: enrichment is best-effort - one bad LLM response never aborts the whole ingest run. Gotcha: this swallows ALL exceptions broadly, including bugs in tagger setup - if tagging silently stops working, check this catch block first, not just the LLM server."
     },
     {
       "file": "loda_data.py",
-      "line": 46,
+      "line": 44,
       "title": "Merging Tags Into Metadata",
       "description": "Situation: merge_tags combines LLM output with the page's existing metadata. Mechanism: it returns a *new* Document (page_content and metadata are never mutated in place), keeping only keys present in the schema. Implication: this immutability is what makes tag_page and merge_tags trivially unit-testable with plain equality checks. Gotcha: unrelated keys in the LLM response (e.g. a stray \"unrelated\" field) are silently dropped, not an error."
     },
@@ -48,13 +48,13 @@
     },
     {
       "file": "loda_data.py",
-      "line": 64,
+      "line": 62,
       "title": "Stage 3: Batching for Rate Limits",
       "description": "Situation: make_batches slices the chunked documents into groups before embedding. Mechanism: plain generator, yields batch_size-sized slices, last batch may be smaller. Implication: exists solely to respect Voyage's free-tier limit (3 req/min, 10K tokens/min) - see EMBED_BATCH_SIZE=50 and EMBED_BATCH_SLEEP_SECONDS=25 at lines 18-19. Gotcha: don't remove the sleep between batches (line 111) without first checking the current Voyage tier - it's the only thing preventing rate-limit errors."
     },
     {
       "file": "loda_data.py",
-      "line": 103,
+      "line": 104,
       "title": "Stage 4 & 5: Embed and Upsert in Throttled Batches",
       "description": "Situation: this loop is the actual embedding + storage step. Mechanism: for each batch, vector_store.add_documents() embeds via Voyage and upserts into MongoDBAtlasVectorSearch, then sleeps unless it's the last batch. Implication: progress is printed per batch (stored_so_far/total) so a long run is observable. Gotcha: stored_so_far is a running counter, not recomputed each iteration - a leftover comment from a prior O(n^2) version may still reference summing batches; trust the += here."
     },

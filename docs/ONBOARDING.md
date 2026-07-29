@@ -2,8 +2,12 @@
 
 ## Overview
 
-Single-script RAG ingestion pipeline. PDF → filter noise pages → LLM tag
-metadata → chunk → Voyage embed → MongoDB Atlas Vector Search.
+Two-script RAG demo over MongoDB Atlas Vector Search.
+
+- **Ingest** (`loda_data.py`): PDF → filter noise pages → LLM tag metadata →
+  chunk → Voyage embed → Atlas.
+- **Retrieve** (`rag.py`): query → Voyage embed → Atlas vector search →
+  printed snippets.
 
 ## Tech Stack
 
@@ -15,34 +19,46 @@ metadata → chunk → Voyage embed → MongoDB Atlas Vector Search.
 | Embeddings | Voyage AI (`voyage-3.5-lite`) |
 | LLM tagging | OpenAI-compatible local server (LM Studio) via `ChatOpenAI` |
 | Testing | pytest |
+| Dev tooling | ruff, vulture, pyright — run ephemerally via `uvx` / `npx` |
 
 No `requirements.txt` — deps live only in `.venv`. `pyproject.toml` holds
 pytest config only, not packaging metadata.
 
 ## Architecture
 
-`loda_data.py` (117 lines) is the whole pipeline. Pure logic is extracted
-into top-level functions for unit testing; all side effects (Mongo/PDF/LLM/
-Voyage) live in `main()`, guarded by `if __name__ == "__main__":` so
-importing the module (e.g. from tests) triggers no network calls.
+Three modules, ~180 lines total. Both scripts follow the same convention:
+pure logic extracted into top-level functions for unit testing, all side
+effects (Mongo/PDF/LLM/Voyage) confined to `main()` behind
+`if __name__ == "__main__":`, so importing a module triggers no network calls.
+
+`config.py` holds the three settings both halves must agree on — `DB_NAME`,
+`COLLECTION_NAME`, `EMBED_MODEL`. It is a separate module rather than living in
+`loda_data.py` so that the query path does not import the PDF/ingest stack
+(that cost 251 ms of `rag`'s 581 ms import for code it never calls).
 
 ## Key Entry Points
 
-- **Pipeline script**: `loda_data.py` — run via `python loda_data.py`
-- **Config**: `key_param.py` (gitignored) — `MONGODB_URI`, `VOYAGE_API_KEY`,
+- **Ingest script**: `loda_data.py` — run via `python loda_data.py`
+- **Query script**: `rag.py` — run via `python rag.py "your question"`
+- **Shared settings**: `config.py` — `DB_NAME`, `COLLECTION_NAME`, `EMBED_MODEL`
+- **Secrets**: `key_param.py` (gitignored) — `MONGODB_URI`, `VOYAGE_API_KEY`,
   `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`
-- **Config template**: `key_param.example.py`
+- **Secrets template**: `key_param.example.py`
 - **Sample input**: `sample_files/mongodb.pdf`
 
 ## Directory Map
 
 ```
-loda_data.py            → pipeline: pure fns top-level, side effects in main()
+config.py               → DB_NAME, COLLECTION_NAME, EMBED_MODEL (shared by both scripts)
+loda_data.py            → ingest: pure fns top-level, side effects in main()
+rag.py                  → retrieval: pure fns top-level, side effects in main()
 tests/conftest.py       → mocked LLM/Document fixtures
-tests/test_loda_data.py → unit tests, no real Mongo/Voyage/LM Studio calls
-key_param.py             → gitignored secrets
-key_param.example.py     → secrets template
-sample_files/             → sample PDF input
+tests/test_loda_data.py → ingest unit tests
+tests/test_rag.py       → retrieval unit tests + import-hygiene guards
+key_param.py            → gitignored secrets
+key_param.example.py    → secrets template
+sample_files/           → sample PDF input
+docs/testing/           → TDD evidence reports
 ```
 
 ## Request/Data Lifecycle
@@ -65,6 +81,23 @@ sample_files/             → sample PDF input
    Voyage's free-tier rate limit (3 req/min, 10K tokens/min) — do not remove
    the sleep without checking the current Voyage tier.
 
+## Retrieval Lifecycle (`rag.py`)
+
+1. `resolve_query(argv)` — first CLI argument, else `DEFAULT_QUERY`.
+2. `make_embeddings()` — Voyage client on the shared `EMBED_MODEL`.
+3. `main()` builds `MongoDBAtlasVectorSearch` against `vector_index` and
+   retrieves `TOP_K=3` chunks by similarity.
+4. `format_results(docs)` — page-numbered snippets truncated to 300 chars, or
+   `"No matching chunks found."` for zero hits.
+
+## Gotcha: embedding dimensions
+
+Query and stored vectors must come from the same model. The Atlas
+`vector_index` must declare `numDimensions: 1024` to match `voyage-3.5-lite`.
+A mismatch does not raise — search just returns nothing useful. This is why
+`EMBED_MODEL` is single-sourced in `config.py`, and why the test suite asserts
+both scripts agree on it.
+
 ## Conventions
 
 - Pure logic top-level, testable without network; all I/O confined to
@@ -75,9 +108,13 @@ sample_files/             → sample PDF input
 ## Common Tasks
 
 ```bash
-cp key_param.example.py key_param.py   # fill in secrets, gitignored
-python loda_data.py                    # run the ingestion pipeline
-pytest tests/ -v                       # run unit tests
+cp key_param.example.py key_param.py     # fill in secrets, gitignored
+python loda_data.py                      # run the ingestion pipeline
+python rag.py                            # query with the demo question
+python rag.py "how does sharding work?"  # query with your own
+pytest tests/ -v                         # run unit tests
+uvx ruff check .                         # lint without touching .venv
+npx pyright                              # type check
 ```
 
 ## Where to Look
@@ -88,5 +125,8 @@ pytest tests/ -v                       # run unit tests
 | Change LLM tagging schema/logic | `tag_page` / `merge_tags` in `loda_data.py` |
 | Change chunking/embedding/upsert | `main()` in `loda_data.py` |
 | Change batching/rate-limit behavior | `make_batches`, `EMBED_BATCH_SIZE`, `EMBED_BATCH_SLEEP_SECONDS` |
-| Add a test | `tests/test_loda_data.py`, fixtures in `tests/conftest.py` |
-| Update secrets/config shape | `key_param.example.py` |
+| Change what a query returns | `format_results` / `TOP_K` in `rag.py` |
+| Change the query source | `resolve_query` in `rag.py` |
+| Switch embedding model | `EMBED_MODEL` in `config.py` — **and** the Atlas index dimensions |
+| Add a test | `tests/test_loda_data.py` or `tests/test_rag.py`, fixtures in `tests/conftest.py` |
+| Update secrets shape | `key_param.example.py` |

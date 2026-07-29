@@ -8,7 +8,7 @@ from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_voyageai import VoyageAIEmbeddings
 
 import key_param
-from loda_data import COLLECTION_NAME, DB_NAME, EMBED_MODEL
+from config import COLLECTION_NAME, DB_NAME, EMBED_MODEL
 
 INDEX_NAME = "vector_index"
 TOP_K = 3

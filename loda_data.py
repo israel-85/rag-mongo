@@ -12,16 +12,12 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import key_param
+from config import COLLECTION_NAME, DB_NAME, EMBED_MODEL
 
 # Voyage free tier allows 3 requests/min and 10K tokens/min, so embeddings are
 # pushed in throttled batches instead of one big from_documents() call.
 EMBED_BATCH_SIZE = 50
 EMBED_BATCH_SLEEP_SECONDS = 25
-
-DB_NAME = "book_mongodb_chunks"
-COLLECTION_NAME = "chunked_data"
-# shared with rag.py - query and stored vectors must come from the same model
-EMBED_MODEL = "voyage-3.5-lite"
 
 SCHEMA = {
     "title": "DocumentMetadata",

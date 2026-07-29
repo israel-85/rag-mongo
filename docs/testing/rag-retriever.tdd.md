@@ -74,3 +74,23 @@ the live run above rather than by a test — same convention as `loda_data.main(
 `QUERY` was renamed to `DEFAULT_QUERY`; argv parsing is isolated in the pure `resolve_query(argv)`
 so it is testable without touching `sys.argv`. Deliberately no `argparse` — one positional
 argument does not need it; add it when flags appear.
+
+## Follow-up cycle — review findings M3/M4 (2026-07-29)
+
+| Task | Validation | Result |
+|------|-----------|--------|
+| M3+M4 reproducers | `pytest tests/test_rag.py -q` | RED — `ModuleNotFoundError: No module named 'config'` (collection-time) |
+| M3 isolated reproducer | standalone script, patch+reload without the `finally` | RED — `rag.MongoClient left as MagicMock` |
+| Fix applied | `pytest tests/ -q` | GREEN — `17 passed` |
+| Typecheck | `npx pyright rag.py loda_data.py config.py tests/` | 0 errors |
+| Import cost | `python -X importtime -c "import rag"` | 330 ms, down from 581 ms; `loda_data` and `langchain_community` no longer loaded |
+| End-to-end | `.venv/bin/python rag.py "how does sharding work?"` | 3 chunks (page 33) |
+
+| # | Guarantee | Test | Type | Result |
+|---|-----------|------|------|--------|
+| 7 | The reload test restores the real `MongoClient` for later tests | `tests/test_rag.py::test_import_opens_no_mongo_connection` | unit | PASS |
+| 8 | Importing `rag` does not load `langchain_community` | `tests/test_rag.py::test_import_stays_out_of_the_ingest_stack` | unit | PASS |
+
+`DB_NAME`, `COLLECTION_NAME` and `EMBED_MODEL` now live in `config.py`, imported by both
+`loda_data.py` and `rag.py`. Test 8 runs the probe in a subprocess because `loda_data` is already
+in `sys.modules` within the pytest session, which would mask the regression.

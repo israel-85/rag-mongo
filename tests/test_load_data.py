@@ -1,6 +1,6 @@
 from langchain_core.documents import Document
 
-from loda_data import SCHEMA, filter_pages, make_batches, merge_tags, tag_page
+from load_data import SCHEMA, filter_pages, make_batches, merge_tags, tag_page
 
 
 class TestFilterPages:

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two-script RAG demo over MongoDB Atlas Vector Search:
 
-- **Ingest** (`loda_data.py`): PDF → cleaned/filtered pages → LLM metadata tagging → chunking →
+- **Ingest** (`load_data.py`): PDF → cleaned/filtered pages → LLM metadata tagging → chunking →
   Voyage embeddings → Atlas.
 - **Retrieve** (`rag.py`): query → Voyage embedding → Atlas vector search → printed snippets.
 
@@ -20,7 +20,7 @@ pydantic, voyageai, pytest). `pyproject.toml` holds only pytest config, not pack
 
 ```bash
 cp key_param.example.py key_param.py   # fill in MONGODB_URI, VOYAGE_API_KEY, LLM_* — gitignored
-python loda_data.py                    # run the ingestion pipeline
+python load_data.py                    # run the ingestion pipeline
 python rag.py                          # query with the built-in demo question
 python rag.py "how does sharding work?"  # or pass your own query
 pytest tests/ -v                       # run unit tests (no external services needed)
@@ -39,7 +39,7 @@ in their own module for two reasons:
 
 1. **Correctness** — query and stored vectors must come from the same embedding model. A mismatch
    is silent: Atlas returns nothing or nonsense rather than erroring.
-2. **Import cost** — `rag.py` previously read these from `loda_data`, which pulled `PyPDFLoader`
+2. **Import cost** — `rag.py` previously read these from `load_data`, which pulled `PyPDFLoader`
    and the sunset `langchain_community` into the query path (251 ms of a 581 ms import, for code
    retrieval never calls).
 
@@ -55,7 +55,7 @@ collection.update_search_index("vector_index", {"fields": [
     {"type": "filter", "path": "hasCode"}]})
 ```
 
-## Ingestion architecture (`loda_data.py`)
+## Ingestion architecture (`load_data.py`)
 
 Pure logic is extracted into top-level functions for unit testing; all side effects (Mongo/PDF/LLM/
 Voyage) live in `main()`, guarded by `if __name__ == "__main__":` so importing the module (e.g. from
@@ -88,7 +88,7 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
 
 ## Tests
 
-- `tests/test_loda_data.py` covers `filter_pages`, `merge_tags`, `tag_page`, `make_batches`.
+- `tests/test_load_data.py` covers `filter_pages`, `merge_tags`, `tag_page`, `make_batches`.
 - `tests/test_rag.py` covers `resolve_query`, `format_results`, embedding/namespace agreement with
   `config`, and two structural guards: importing `rag` must construct no `MongoClient`, and must
   not load `langchain_community` (checked in a subprocess, since the ingest module is already in

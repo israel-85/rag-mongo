@@ -17,7 +17,7 @@ Source plan: none; journeys derived during this TDD run (2026-07-29).
 | End-to-end run | `.venv/bin/python rag.py` | 3 chunks printed (pages 31, 32, 32) for the transactions query |
 
 Root cause: `rag.py` embedded queries with `OpenAIEmbeddings` (1536-dim, using the LM Studio
-key against api.openai.com) while `loda_data.py` stored Voyage `voyage-3.5-lite` vectors
+key against api.openai.com) while `load_data.py` stored Voyage `voyage-3.5-lite` vectors
 (1024-dim). The Atlas `vector_index` also declared `numDimensions: 1536` against 1024-dim data;
 updated in place via `update_search_index` and polled to `READY`.
 
@@ -35,9 +35,9 @@ Second RED/GREEN cycle addressing `.claude/reviews/rag-retriever-review.md`:
 
 | Task | Validation | Result |
 |------|-----------|--------|
-| M1 reproducer: assert one shared `EMBED_MODEL` | `pytest tests/test_rag.py -q` | RED — `AttributeError: module 'loda_data' has no attribute 'EMBED_MODEL'` |
+| M1 reproducer: assert one shared `EMBED_MODEL` | `pytest tests/test_rag.py -q` | RED — `AttributeError: module 'load_data' has no attribute 'EMBED_MODEL'` |
 | M1+M2 fix: hoist `EMBED_MODEL`, import shared constants into `rag` | `pytest tests/ -q` | GREEN — `13 passed` |
-| Typecheck | `npx pyright rag.py loda_data.py tests/test_rag.py` | 0 errors |
+| Typecheck | `npx pyright rag.py load_data.py tests/test_rag.py` | 0 errors |
 | End-to-end rerun | `.venv/bin/python rag.py` | 3 chunks printed (pages 31, 32, 32) |
 
 M2 (`test_import_triggers_no_side_effects` asserted only `callable(rag.main)`) needed no
@@ -45,7 +45,7 @@ production change — it was a weak test, not a bug. It now reloads `rag` under 
 `pymongo.MongoClient` and asserts the client is never constructed, plus asserts the patch reaches
 `rag`'s namespace so the check cannot pass vacuously.
 
-Known limitation: with `rag` importing `EMBED_MODEL` from `loda_data`, the equality assertion in
+Known limitation: with `rag` importing `EMBED_MODEL` from `load_data`, the equality assertion in
 test 2 is near-tautological. Its remaining value is catching a re-hardcoded model literal inside
 `make_embeddings`. The structural guarantee now comes from the single definition, not the test.
 
@@ -53,7 +53,7 @@ test 2 is near-tautological. Its remaining value is catching a re-hardcoded mode
 
 No coverage tooling configured (`pyproject.toml` holds pytest config only). All pure logic in
 `rag.py` (`make_embeddings`, `format_results`) is covered; `main()` is I/O-only and verified by
-the live run above rather than by a test — same convention as `loda_data.main()`.
+the live run above rather than by a test — same convention as `load_data.main()`.
 
 ## Follow-up cycle — review findings L1/L2 (2026-07-29)
 
@@ -82,8 +82,8 @@ argument does not need it; add it when flags appear.
 | M3+M4 reproducers | `pytest tests/test_rag.py -q` | RED — `ModuleNotFoundError: No module named 'config'` (collection-time) |
 | M3 isolated reproducer | standalone script, patch+reload without the `finally` | RED — `rag.MongoClient left as MagicMock` |
 | Fix applied | `pytest tests/ -q` | GREEN — `17 passed` |
-| Typecheck | `npx pyright rag.py loda_data.py config.py tests/` | 0 errors |
-| Import cost | `python -X importtime -c "import rag"` | 330 ms, down from 581 ms; `loda_data` and `langchain_community` no longer loaded |
+| Typecheck | `npx pyright rag.py load_data.py config.py tests/` | 0 errors |
+| Import cost | `python -X importtime -c "import rag"` | 330 ms, down from 581 ms; `load_data` and `langchain_community` no longer loaded |
 | End-to-end | `.venv/bin/python rag.py "how does sharding work?"` | 3 chunks (page 33) |
 
 | # | Guarantee | Test | Type | Result |
@@ -92,5 +92,5 @@ argument does not need it; add it when flags appear.
 | 8 | Importing `rag` does not load `langchain_community` | `tests/test_rag.py::test_import_stays_out_of_the_ingest_stack` | unit | PASS |
 
 `DB_NAME`, `COLLECTION_NAME` and `EMBED_MODEL` now live in `config.py`, imported by both
-`loda_data.py` and `rag.py`. Test 8 runs the probe in a subprocess because `loda_data` is already
+`load_data.py` and `rag.py`. Test 8 runs the probe in a subprocess because `load_data` is already
 in `sys.modules` within the pytest session, which would mask the regression.

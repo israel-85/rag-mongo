@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pymongo
 
 import config
-import loda_data
+import load_data
 import rag
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -45,7 +45,7 @@ def test_embeddings_match_ingest_model():
     embeddings = rag.make_embeddings()
 
     assert embeddings.model == config.EMBED_MODEL
-    assert loda_data.EMBED_MODEL is config.EMBED_MODEL
+    assert load_data.EMBED_MODEL is config.EMBED_MODEL
     assert (rag.DB_NAME, rag.COLLECTION_NAME) == (config.DB_NAME, config.COLLECTION_NAME)
 
 

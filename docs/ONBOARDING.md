@@ -4,7 +4,7 @@
 
 Two-script RAG demo over MongoDB Atlas Vector Search.
 
-- **Ingest** (`loda_data.py`): PDF → filter noise pages → LLM tag metadata →
+- **Ingest** (`load_data.py`): PDF → filter noise pages → LLM tag metadata →
   chunk → Voyage embed → Atlas.
 - **Retrieve** (`rag.py`): query → Voyage embed → Atlas vector search →
   printed snippets.
@@ -33,12 +33,12 @@ effects (Mongo/PDF/LLM/Voyage) confined to `main()` behind
 
 `config.py` holds the three settings both halves must agree on — `DB_NAME`,
 `COLLECTION_NAME`, `EMBED_MODEL`. It is a separate module rather than living in
-`loda_data.py` so that the query path does not import the PDF/ingest stack
+`load_data.py` so that the query path does not import the PDF/ingest stack
 (that cost 251 ms of `rag`'s 581 ms import for code it never calls).
 
 ## Key Entry Points
 
-- **Ingest script**: `loda_data.py` — run via `python loda_data.py`
+- **Ingest script**: `load_data.py` — run via `python load_data.py`
 - **Query script**: `rag.py` — run via `python rag.py "your question"`
 - **Shared settings**: `config.py` — `DB_NAME`, `COLLECTION_NAME`, `EMBED_MODEL`
 - **Secrets**: `key_param.py` (gitignored) — `MONGODB_URI`, `VOYAGE_API_KEY`,
@@ -50,10 +50,10 @@ effects (Mongo/PDF/LLM/Voyage) confined to `main()` behind
 
 ```
 config.py               → DB_NAME, COLLECTION_NAME, EMBED_MODEL (shared by both scripts)
-loda_data.py            → ingest: pure fns top-level, side effects in main()
+load_data.py            → ingest: pure fns top-level, side effects in main()
 rag.py                  → retrieval: pure fns top-level, side effects in main()
 tests/conftest.py       → mocked LLM/Document fixtures
-tests/test_loda_data.py → ingest unit tests
+tests/test_load_data.py → ingest unit tests
 tests/test_rag.py       → retrieval unit tests + import-hygiene guards
 key_param.py            → gitignored secrets
 key_param.example.py    → secrets template
@@ -109,7 +109,7 @@ both scripts agree on it.
 
 ```bash
 cp key_param.example.py key_param.py     # fill in secrets, gitignored
-python loda_data.py                      # run the ingestion pipeline
+python load_data.py                      # run the ingestion pipeline
 python rag.py                            # query with the demo question
 python rag.py "how does sharding work?"  # query with your own
 pytest tests/ -v                         # run unit tests
@@ -121,12 +121,12 @@ npx pyright                              # type check
 
 | I want to... | Look at... |
 |--------------|-----------|
-| Change page filtering | `filter_pages` in `loda_data.py` |
-| Change LLM tagging schema/logic | `tag_page` / `merge_tags` in `loda_data.py` |
-| Change chunking/embedding/upsert | `main()` in `loda_data.py` |
+| Change page filtering | `filter_pages` in `load_data.py` |
+| Change LLM tagging schema/logic | `tag_page` / `merge_tags` in `load_data.py` |
+| Change chunking/embedding/upsert | `main()` in `load_data.py` |
 | Change batching/rate-limit behavior | `make_batches`, `EMBED_BATCH_SIZE`, `EMBED_BATCH_SLEEP_SECONDS` |
 | Change what a query returns | `format_results` / `TOP_K` in `rag.py` |
 | Change the query source | `resolve_query` in `rag.py` |
 | Switch embedding model | `EMBED_MODEL` in `config.py` — **and** the Atlas index dimensions |
-| Add a test | `tests/test_loda_data.py` or `tests/test_rag.py`, fixtures in `tests/conftest.py` |
+| Add a test | `tests/test_load_data.py` or `tests/test_rag.py`, fixtures in `tests/conftest.py` |
 | Update secrets shape | `key_param.example.py` |

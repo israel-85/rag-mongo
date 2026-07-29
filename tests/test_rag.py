@@ -26,6 +26,19 @@ def test_embeddings_match_ingest_model():
     assert rag.COLLECTION_NAME == loda_data.COLLECTION_NAME
 
 
+def test_format_results_signals_zero_hits():
+    """An empty result set must say so, not print a blank line."""
+    assert "no matching" in rag.format_results([]).lower()
+
+
+def test_resolve_query_prefers_cli_argument():
+    assert rag.resolve_query(["rag.py", "how do indexes work?"]) == "how do indexes work?"
+
+
+def test_resolve_query_falls_back_to_default():
+    assert rag.resolve_query(["rag.py"]) == rag.DEFAULT_QUERY
+
+
 def test_format_results_prints_source_and_snippet():
     """Results render as page-numbered snippets, not raw Document repr."""
     from langchain_core.documents import Document

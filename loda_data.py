@@ -20,6 +20,8 @@ EMBED_BATCH_SLEEP_SECONDS = 25
 
 DB_NAME = "book_mongodb_chunks"
 COLLECTION_NAME = "chunked_data"
+# shared with rag.py - query and stored vectors must come from the same model
+EMBED_MODEL = "voyage-3.5-lite"
 
 SCHEMA = {
     "title": "DocumentMetadata",
@@ -95,7 +97,7 @@ def main() -> None:
     split_docs = text_splitter.split_documents(docs)
 
     embeddings = VoyageAIEmbeddings(
-        api_key=SecretStr(key_param.VOYAGE_API_KEY), model="voyage-3.5-lite"
+        api_key=SecretStr(key_param.VOYAGE_API_KEY), model=EMBED_MODEL
     )
 
     vector_store = MongoDBAtlasVectorSearch(collection=collection, embedding=embeddings)

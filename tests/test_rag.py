@@ -1,18 +1,27 @@
+import importlib
+from unittest.mock import patch
+
+import pymongo
+
+import loda_data
 import rag
 
 
-def test_import_triggers_no_side_effects():
-    """Importing rag must not query Mongo/Voyage - all I/O lives in main()."""
-    assert callable(rag.main)
+def test_import_opens_no_mongo_connection():
+    """Importing rag must not construct a MongoClient - all I/O lives in main()."""
+    with patch.object(pymongo, "MongoClient") as mongo_client:
+        importlib.reload(rag)
+        # the patch must actually reach rag's namespace, or the assertion below is vacuous
+        assert rag.MongoClient is mongo_client
+
+    mongo_client.assert_not_called()
 
 
 def test_embeddings_match_ingest_model():
-    """Query embeddings must use the same model as ingestion (voyage-3.5-lite, 1024-dim)."""
-    import loda_data
-
+    """Query and ingest must share one embedding model - drift silently breaks retrieval."""
     embeddings = rag.make_embeddings()
 
-    assert embeddings.model == "voyage-3.5-lite"
+    assert embeddings.model == loda_data.EMBED_MODEL
     assert rag.DB_NAME == loda_data.DB_NAME
     assert rag.COLLECTION_NAME == loda_data.COLLECTION_NAME
 

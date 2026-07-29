@@ -54,3 +54,23 @@ test 2 is near-tautological. Its remaining value is catching a re-hardcoded mode
 No coverage tooling configured (`pyproject.toml` holds pytest config only). All pure logic in
 `rag.py` (`make_embeddings`, `format_results`) is covered; `main()` is I/O-only and verified by
 the live run above rather than by a test — same convention as `loda_data.main()`.
+
+## Follow-up cycle — review findings L1/L2 (2026-07-29)
+
+| Task | Validation | Result |
+|------|-----------|--------|
+| L1+L2 reproducers | `pytest tests/test_rag.py -q` | RED — `assert 'no matching' in ''`; `module 'rag' has no attribute 'resolve_query'` (x2) |
+| Fix applied | `pytest tests/ -q` | GREEN — `16 passed` |
+| Typecheck | `npx pyright rag.py` | 0 errors |
+| Default query | `.venv/bin/python rag.py` | 3 chunks (pages 31, 32, 32) |
+| CLI query | `.venv/bin/python rag.py "how does sharding work?"` | 3 chunks (page 33, Change Streams) |
+
+| # | Guarantee | Test | Type | Result |
+|---|-----------|------|------|--------|
+| 4 | Zero hits print an explicit message, not a blank line | `tests/test_rag.py::test_format_results_signals_zero_hits` | unit | PASS |
+| 5 | First CLI argument becomes the query | `tests/test_rag.py::test_resolve_query_prefers_cli_argument` | unit | PASS |
+| 6 | No argument falls back to `DEFAULT_QUERY` | `tests/test_rag.py::test_resolve_query_falls_back_to_default` | unit | PASS |
+
+`QUERY` was renamed to `DEFAULT_QUERY`; argv parsing is isolated in the pure `resolve_query(argv)`
+so it is testable without touching `sys.argv`. Deliberately no `argparse` — one positional
+argument does not need it; add it when flags appear.

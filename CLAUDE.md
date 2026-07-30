@@ -16,7 +16,8 @@ Two-script RAG demo over MongoDB Atlas Vector Search:
 
 No `requirements.txt` — deps live only in `.venv` (langchain, langchain-openai,
 langchain-community, langchain-mongodb, langchain-voyageai, langchain-text-splitters, pymongo,
-pydantic, voyageai, pytest). `pyproject.toml` holds only pytest config, not packaging metadata.
+pydantic, voyageai, pytest, pytest-cov). `pyproject.toml` holds only pytest config, not packaging
+metadata.
 
 ```bash
 cp key_param.example.py key_param.py   # fill in MONGODB_URI, VOYAGE_API_KEY, LLM_* — gitignored
@@ -24,6 +25,7 @@ python load_data.py                    # run the ingestion pipeline
 python rag.py                          # query with the built-in demo question
 python rag.py "how does sharding work?"  # or pass your own query
 pytest tests/ -v                       # run unit tests (no external services needed)
+pytest tests/ --cov=rag --cov=load_data --cov-report=term-missing   # coverage
 ```
 
 `key_param.py` expects an LM Studio (or other OpenAI-compatible) local server for `LLM_BASE_URL`
@@ -85,14 +87,22 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
    by similarity.
 4. `format_results(docs)` — renders page-numbered snippets truncated to `SNIPPET_CHARS=300`, or
    `"No matching chunks found."` for zero hits.
+5. `main()` feeds those same docs to `PromptTemplate | ChatOpenAI | StrOutputParser` — retrieval
+   happens once, and the docs are reused for both the snippet block and the prompt context.
+6. `stream_answer(chunks, out)` — writes each token from `rag_chain.stream()` and flushes after
+   every one. The flush is load-bearing: stdout is block-buffered when piped, so without it the
+   whole answer lands at once and the stream is invisible. `RunnablePassthrough` is deliberately
+   absent — `main()` builds the prompt input dict itself, so there is nothing to pass through.
 
 ## Tests
 
 - `tests/test_load_data.py` covers `filter_pages`, `merge_tags`, `tag_page`, `make_batches`.
-- `tests/test_rag.py` covers `resolve_query`, `format_results`, embedding/namespace agreement with
-  `config`, and two structural guards: importing `rag` must construct no `MongoClient`, and must
-  not load `langchain_community` (checked in a subprocess, since the ingest module is already in
-  `sys.modules` inside the pytest session).
+- `tests/test_rag.py` covers `resolve_query`, `format_results`, `stream_answer`, embedding/namespace
+  agreement with `config`, and two structural guards: importing `rag` must construct no
+  `MongoClient`, and must not load `langchain_community` (checked in a subprocess, since the ingest
+  module is already in `sys.modules` inside the pytest session).
+  `stream_answer` is tested through a `RecordingStream` fake that logs write/flush order, so the
+  "flush after every token" guarantee is asserted rather than assumed.
 
 All tests use mocked LLM/`Document` fixtures (`tests/conftest.py`) — no real Mongo/Voyage/LM Studio
 calls. `main()` in both scripts is I/O-only and verified by running the scripts, not by tests.

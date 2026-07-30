@@ -6,6 +6,9 @@ from pymongo import MongoClient
 from langchain_core.documents import Document
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_voyageai import VoyageAIEmbeddings
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
 
 import key_param
 from config import COLLECTION_NAME, DB_NAME, EMBED_MODEL
@@ -46,10 +49,37 @@ def main() -> None:
         index_name=INDEX_NAME,
     )
 
-    retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": TOP_K})
+    retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": TOP_K,
+                "pre_filter": { "hasCode": { "$eq": False } },
+                "score_threshold": 0.01
+})
     query = resolve_query(sys.argv)
     print(f"Query: {query}\n")
-    print(format_results(retriever.invoke(query)))
+    template = """
+        Use the following pieces of context to answer the question at the end.
+        If you don't know the answer, just say that you don't know, don't try to make up an answer.
+        Do not answer the question if there is no given context.
+        Do not answer the question if it is not related to the context.
+        Do not give recommendations to anything other than MongoDB.
+        Context:
+        {context}
+        Question: {question}
+        """
+    custom_rag_prompt = PromptTemplate.from_template(template)
+    docs = retriever.invoke(query)
+    print(format_results(docs))
+    llm = ChatOpenAI(
+            api_key=SecretStr(key_param.LLM_API_KEY),
+            base_url=key_param.LLM_BASE_URL,
+            temperature=0,
+            model=key_param.LLM_MODEL,
+        )
+    rag_chain = custom_rag_prompt | llm | StrOutputParser()
+    answer = rag_chain.invoke({
+        "context": "\n\n".join(d.page_content for d in docs),
+        "question": query,
+    })
+    print(f"\nAnswer:\n{answer}")
     client.close()
 
 

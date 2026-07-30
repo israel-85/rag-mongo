@@ -80,16 +80,22 @@ tests) triggers no network calls:
 
 Same convention: pure functions at top level, all I/O in `main()` behind `if __name__`.
 
-1. `resolve_query(argv)` — first CLI argument, else `DEFAULT_QUERY`.
+1. `resolve_query(argv)` — first CLI argument, stripped; if absent or blank, `DEFAULT_QUERY`. The
+   blank guard matters because `python rag.py ""` (easy to produce from shell quoting) would
+   otherwise embed an empty string and retrieve noise rather than nothing.
 2. `make_embeddings()` — Voyage client on `EMBED_MODEL`. Must stay in sync with ingestion; that is
    what `config.EMBED_MODEL` is for.
 3. `main()` builds `MongoDBAtlasVectorSearch` against `INDEX_NAME` and retrieves `TOP_K=3` chunks
    by similarity.
-4. `main()` feeds the retrieved docs straight to `PromptTemplate | ChatOpenAI | StrOutputParser`.
-   Retrieved chunk text never reaches the console — only the query and the streamed answer are
-   printed. (A `format_results` snippet renderer existed for this and was deleted once `main()`
-   stopped calling it.)
-5. `stream_answer(chunks, out)` — writes each token from `rag_chain.stream()` and flushes after
+4. `format_context(docs)` — joins the retrieved chunks with a blank line into the prompt's
+   `context`. Only `page_content` is used; chunk metadata (`title`, `keywords`, `hasCode`) is
+   deliberately left out of the prompt. Empty retrieval yields `""`, and the prompt's "do not
+   answer if there is no given context" instruction takes over from there.
+5. `main()` feeds that context to `PromptTemplate | ChatOpenAI | StrOutputParser`. Retrieved chunk
+   text never reaches the console — only the query and the streamed answer are printed. (A
+   `format_results` snippet renderer existed for this and was deleted once `main()` stopped
+   calling it.)
+6. `stream_answer(chunks, out)` — writes each token from `rag_chain.stream()` and flushes after
    every one. The flush is load-bearing: stdout is block-buffered when piped, so without it the
    whole answer lands at once and the stream is invisible. `RunnablePassthrough` is deliberately
    absent — `main()` builds the prompt input dict itself, so there is nothing to pass through.
@@ -97,7 +103,7 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
 ## Tests
 
 - `tests/test_load_data.py` covers `filter_pages`, `merge_tags`, `tag_page`, `make_batches`.
-- `tests/test_rag.py` covers `resolve_query`, `stream_answer`, embedding/namespace
+- `tests/test_rag.py` covers `resolve_query`, `format_context`, `stream_answer`, embedding/namespace
   agreement with `config`, and two structural guards: importing `rag` must construct no
   `MongoClient`, and must not load `langchain_community` (checked in a subprocess, since the ingest
   module is already in `sys.modules` inside the pytest session).

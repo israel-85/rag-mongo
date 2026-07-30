@@ -73,3 +73,55 @@ def test_format_results_prints_source_and_snippet():
     assert "page 7" in lines
     assert "Txns" in lines
     assert len(lines) < 400
+
+
+class RecordingStream:
+    """Captures write/flush order so tests can prove output is not buffered."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str]] = []
+
+    def write(self, text: str) -> int:
+        self.calls.append(("write", text))
+        return len(text)
+
+    def flush(self) -> None:
+        self.calls.append(("flush", ""))
+
+
+def test_stream_answer_writes_each_token_separately():
+    """Tokens reach the terminal one at a time - no waiting for the full answer."""
+    out = RecordingStream()
+
+    rag.stream_answer(iter(["Mongo", "DB ", "4.0"]), out)
+
+    writes = [text for kind, text in out.calls if kind == "write"]
+    assert writes[:3] == ["Mongo", "DB ", "4.0"]
+
+
+def test_stream_answer_flushes_after_every_token():
+    """Without a flush per token, stdout buffers and streaming is invisible."""
+    out = RecordingStream()
+
+    rag.stream_answer(iter(["a", "b"]), out)
+
+    assert out.calls[:4] == [("write", "a"), ("flush", ""), ("write", "b"), ("flush", "")]
+
+
+def test_stream_answer_terminates_the_line():
+    """The streamed answer has no trailing newline of its own; add one."""
+    out = RecordingStream()
+
+    rag.stream_answer(iter(["done"]), out)
+
+    assert out.calls[-1] == ("flush", "")
+    assert [text for kind, text in out.calls if kind == "write"][-1] == "\n"
+
+
+def test_stream_answer_handles_empty_stream():
+    """An LLM that returns nothing must not crash the run."""
+    out = RecordingStream()
+
+    rag.stream_answer(iter([]), out)
+
+    assert [text for kind, text in out.calls if kind == "write"] == ["\n"]

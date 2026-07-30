@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pymongo
+from langchain_core.documents import Document
 
 import config
 import load_data
@@ -68,6 +69,26 @@ def test_resolve_query_strips_surrounding_whitespace():
     """A padded query is still a query; the padding is not part of it."""
     assert rag.resolve_query(["rag.py", "  how do indexes work?  "]) == "how do indexes work?"
 
+
+def test_format_context_joins_chunks_with_a_blank_line():
+    """Chunks are separate passages - a blank line keeps them from reading as one."""
+    docs = [Document(page_content="first"), Document(page_content="second")]
+
+    assert rag.format_context(docs) == "first\n\nsecond"
+
+def test_format_context_handles_a_single_chunk():
+    """One chunk means no separator at all - no leading or trailing blank line."""
+    assert rag.format_context([Document(page_content="only")]) == "only"
+
+def test_format_context_handles_no_chunks():
+    """Retrieval can return nothing; the prompt then tells the LLM to refuse."""
+    assert rag.format_context([]) == ""
+
+def test_format_context_keeps_chunk_text_verbatim():
+    """Only page_content reaches the prompt - metadata must not leak in."""
+    docs = [Document(page_content="body", metadata={"title": "leak", "hasCode": True})]
+
+    assert rag.format_context(docs) == "body"
 
 class RecordingStream:
     """Captures write/flush order so tests can prove output is not buffered."""

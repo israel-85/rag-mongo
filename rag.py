@@ -2,6 +2,7 @@ import sys
 from collections.abc import Iterable
 from typing import Any, TextIO
 
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_mongodb import MongoDBAtlasVectorSearch
@@ -29,6 +30,10 @@ def resolve_query(argv: list[str]) -> str:
     query = argv[1].strip() if len(argv) > 1 else ""
     return query or DEFAULT_QUERY
 
+
+def format_context(docs: Iterable[Document]) -> str:
+    """Join retrieved chunks into the prompt's context block - text only, no metadata."""
+    return "\n\n".join(doc.page_content for doc in docs)
 
 def stream_answer(chunks: Iterable[str], out: TextIO = sys.stdout) -> None:
     """Echo tokens as the LLM produces them - flush per token or stdout buffers."""
@@ -76,7 +81,7 @@ def main() -> None:
         rag_chain = custom_rag_prompt | llm | StrOutputParser()
         print("\nAnswer:")
         stream_answer(rag_chain.stream({
-            "context": "\n\n".join(d.page_content for d in docs),
+            "context": format_context(docs),
             "question": query,
         }))
 

@@ -86,16 +86,23 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
 2. `make_embeddings()` — Voyage client on `EMBED_MODEL`. Must stay in sync with ingestion; that is
    what `config.EMBED_MODEL` is for.
 3. `main()` builds `MongoDBAtlasVectorSearch` against `INDEX_NAME` and retrieves `TOP_K=3` chunks
-   by similarity.
+   by similarity. Note that the `score_threshold` in `search_kwargs` is **inert**: LangChain only
+   honours it for `search_type="similarity_score_threshold"`, and this code passes
+   `search_type="similarity"`. It is kept as a marker for the intended behaviour — do not assume
+   weak matches are being filtered out today.
 4. `format_context(docs)` — joins the retrieved chunks with a blank line into the prompt's
    `context`. Only `page_content` is used; chunk metadata (`title`, `keywords`, `hasCode`) is
-   deliberately left out of the prompt. Empty retrieval yields `""`, and the prompt's "do not
-   answer if there is no given context" instruction takes over from there.
-5. `main()` feeds that context to `PromptTemplate | ChatOpenAI | StrOutputParser`. Retrieved chunk
+   deliberately left out of the prompt. Blank chunks are dropped rather than joined, so `""` always
+   means "nothing worth answering from" — never "chunks that happen to be whitespace".
+5. `main()` refuses on empty context: if `format_context` returns `""` it prints
+   `NO_CONTEXT_MESSAGE` and returns without constructing the LLM. This is deliberately structural
+   rather than relying on the prompt's "do not answer if there is no given context" line — a small
+   local model may ignore that instruction and answer from parametric memory instead.
+6. `main()` feeds that context to `PromptTemplate | ChatOpenAI | StrOutputParser`. Retrieved chunk
    text never reaches the console — only the query and the streamed answer are printed. (A
    `format_results` snippet renderer existed for this and was deleted once `main()` stopped
    calling it.)
-6. `stream_answer(chunks, out)` — writes each token from `rag_chain.stream()` and flushes after
+7. `stream_answer(chunks, out)` — writes each token from `rag_chain.stream()` and flushes after
    every one. The flush is load-bearing: stdout is block-buffered when piped, so without it the
    whole answer lands at once and the stream is invisible. `RunnablePassthrough` is deliberately
    absent — `main()` builds the prompt input dict itself, so there is nothing to pass through.

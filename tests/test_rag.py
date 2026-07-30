@@ -56,6 +56,18 @@ def test_resolve_query_prefers_cli_argument():
 def test_resolve_query_falls_back_to_default():
     assert rag.resolve_query(["rag.py"]) == rag.DEFAULT_QUERY
 
+def test_resolve_query_ignores_empty_argument():
+    """An empty arg is not a question - embedding it retrieves noise."""
+    assert rag.resolve_query(["rag.py", ""]) == rag.DEFAULT_QUERY
+
+def test_resolve_query_ignores_blank_argument():
+    """Same for whitespace-only - shell quoting makes this easy to hit by accident."""
+    assert rag.resolve_query(["rag.py", "   "]) == rag.DEFAULT_QUERY
+
+def test_resolve_query_strips_surrounding_whitespace():
+    """A padded query is still a query; the padding is not part of it."""
+    assert rag.resolve_query(["rag.py", "  how do indexes work?  "]) == "how do indexes work?"
+
 
 class RecordingStream:
     """Captures write/flush order so tests can prove output is not buffered."""

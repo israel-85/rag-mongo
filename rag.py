@@ -25,8 +25,9 @@ def make_embeddings() -> VoyageAIEmbeddings:
 
 
 def resolve_query(argv: list[str]) -> str:
-    """First CLI argument is the query; fall back to the demo question."""
-    return argv[1] if len(argv) > 1 else DEFAULT_QUERY
+    """First CLI argument is the query; blank or absent falls back to the demo question."""
+    query = argv[1].strip() if len(argv) > 1 else ""
+    return query or DEFAULT_QUERY
 
 
 def stream_answer(chunks: Iterable[str], out: TextIO = sys.stdout) -> None:

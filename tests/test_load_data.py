@@ -8,7 +8,7 @@ class TestFilterPages:
         pages = [make_page(20), make_page(21)]
         assert filter_pages(pages) == [pages[1]]
 
-    def test_keeps_pages_above_20_words_with_extra_whitespace(self, make_page):
+    def test_keeps_pages_above_20_words_with_extra_whitespace(self):
         page = Document(page_content="word " * 25 + "\n\t  ")
         assert filter_pages([page]) == [page]
 

@@ -86,8 +86,29 @@ def test_format_context_handles_a_single_chunk():
 
 
 def test_format_context_handles_no_chunks():
-    """Retrieval can return nothing; the prompt then tells the LLM to refuse."""
+    """Retrieval can return nothing; main() refuses rather than prompting on empty context."""
     assert rag.format_context([]) == ""
+
+
+def test_format_context_drops_blank_chunks():
+    """A whitespace-only chunk carries no information - it must not look like context."""
+    assert rag.format_context([Document(page_content="   \n ")]) == ""
+
+
+def test_format_context_skips_blank_chunks_between_real_ones():
+    """Dropping a blank chunk must not leave a widened gap in the joined context."""
+    docs = [
+        Document(page_content="first"),
+        Document(page_content="  "),
+        Document(page_content="second"),
+    ]
+
+    assert rag.format_context(docs) == "first\n\nsecond"
+
+
+def test_format_context_preserves_indentation_inside_a_chunk():
+    """Only fully blank chunks are dropped - leading whitespace can be meaningful."""
+    assert rag.format_context([Document(page_content="  indented")]) == "  indented"
 
 
 def test_format_context_keeps_chunk_text_verbatim():

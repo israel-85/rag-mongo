@@ -19,6 +19,11 @@ TOP_K = 3
 
 DEFAULT_QUERY = "When did MongoDB begin supporting multi-document transactions?"
 
+NO_CONTEXT_MESSAGE = (
+    "No relevant context found in the collection - not answering.\n"
+    "If this is unexpected, check that ingestion has run and that the Atlas index is READY."
+)
+
 
 def make_embeddings() -> VoyageAIEmbeddings:
     """Same model as ingestion - query and stored vectors must share dimensions."""
@@ -32,8 +37,12 @@ def resolve_query(argv: list[str]) -> str:
 
 
 def format_context(docs: Iterable[Document]) -> str:
-    """Join retrieved chunks into the prompt's context block - text only, no metadata."""
-    return "\n\n".join(doc.page_content for doc in docs)
+    """Join retrieved chunks into the prompt's context block - text only, no metadata.
+
+    Blank chunks are dropped rather than joined, so an empty return value always
+    means "nothing worth answering from" - that is what main() branches on.
+    """
+    return "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
 
 
 def stream_answer(chunks: Iterable[str], out: TextIO = sys.stdout) -> None:
@@ -61,6 +70,11 @@ def main() -> None:
         query = resolve_query(sys.argv)
         print(f"Query: {query}\n")
         docs = retriever.invoke(query)
+        context = format_context(docs)
+        if not context:
+            print(NO_CONTEXT_MESSAGE)
+            return
+
         template = """
             Use the following pieces of context to answer the question at the end.
             If you don't know the answer, just say that you don't know, don't try to make up an answer.
@@ -82,7 +96,7 @@ def main() -> None:
         rag_chain = custom_rag_prompt | llm | StrOutputParser()
         print("\nAnswer:")
         stream_answer(rag_chain.stream({
-            "context": format_context(docs),
+            "context": context,
             "question": query,
         }))
 

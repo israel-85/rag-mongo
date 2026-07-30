@@ -87,8 +87,8 @@ docs/testing/           → TDD evidence reports
 2. `make_embeddings()` — Voyage client on the shared `EMBED_MODEL`.
 3. `main()` builds `MongoDBAtlasVectorSearch` against `vector_index` and
    retrieves `TOP_K=3` chunks by similarity.
-4. `format_results(docs)` — page-numbered snippets truncated to 300 chars, or
-   `"No matching chunks found."` for zero hits.
+4. `stream_answer(chunks)` — echoes the LLM's tokens as they arrive. Retrieved
+   chunk text is never printed; only the query and the answer are.
 
 ## Gotcha: embedding dimensions
 
@@ -125,7 +125,7 @@ npx pyright                              # type check
 | Change LLM tagging schema/logic | `tag_page` / `merge_tags` in `load_data.py` |
 | Change chunking/embedding/upsert | `main()` in `load_data.py` |
 | Change batching/rate-limit behavior | `make_batches`, `EMBED_BATCH_SIZE`, `EMBED_BATCH_SLEEP_SECONDS` |
-| Change what a query returns | `format_results` / `TOP_K` in `rag.py` |
+| Change what a query returns | `TOP_K` / retriever `search_kwargs` in `rag.py` |
 | Change the query source | `resolve_query` in `rag.py` |
 | Switch embedding model | `EMBED_MODEL` in `config.py` — **and** the Atlas index dimensions |
 | Add a test | `tests/test_load_data.py` or `tests/test_rag.py`, fixtures in `tests/conftest.py` |

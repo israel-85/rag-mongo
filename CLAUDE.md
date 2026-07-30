@@ -85,11 +85,11 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
    what `config.EMBED_MODEL` is for.
 3. `main()` builds `MongoDBAtlasVectorSearch` against `INDEX_NAME` and retrieves `TOP_K=3` chunks
    by similarity.
-4. `format_results(docs)` — renders page-numbered snippets truncated to `SNIPPET_CHARS=300`, or
-   `"No matching chunks found."` for zero hits.
-5. `main()` feeds those same docs to `PromptTemplate | ChatOpenAI | StrOutputParser` — retrieval
-   happens once, and the docs are reused for both the snippet block and the prompt context.
-6. `stream_answer(chunks, out)` — writes each token from `rag_chain.stream()` and flushes after
+4. `main()` feeds the retrieved docs straight to `PromptTemplate | ChatOpenAI | StrOutputParser`.
+   Retrieved chunk text never reaches the console — only the query and the streamed answer are
+   printed. (A `format_results` snippet renderer existed for this and was deleted once `main()`
+   stopped calling it.)
+5. `stream_answer(chunks, out)` — writes each token from `rag_chain.stream()` and flushes after
    every one. The flush is load-bearing: stdout is block-buffered when piped, so without it the
    whole answer lands at once and the stream is invisible. `RunnablePassthrough` is deliberately
    absent — `main()` builds the prompt input dict itself, so there is nothing to pass through.
@@ -97,7 +97,7 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
 ## Tests
 
 - `tests/test_load_data.py` covers `filter_pages`, `merge_tags`, `tag_page`, `make_batches`.
-- `tests/test_rag.py` covers `resolve_query`, `format_results`, `stream_answer`, embedding/namespace
+- `tests/test_rag.py` covers `resolve_query`, `stream_answer`, embedding/namespace
   agreement with `config`, and two structural guards: importing `rag` must construct no
   `MongoClient`, and must not load `langchain_community` (checked in a subprocess, since the ingest
   module is already in `sys.modules` inside the pytest session).

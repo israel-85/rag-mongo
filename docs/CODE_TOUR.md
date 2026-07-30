@@ -37,9 +37,9 @@ Situation: tag_page calls the LLM tagger on a single page's content. Mechanism: 
 Situation: merge_tags combines LLM output with the page's existing metadata. Mechanism: it returns a *new* Document (page_content and metadata are never mutated in place), keeping only keys present in the schema. Implication: this immutability is what makes tag_page and merge_tags trivially unit-testable with plain equality checks. Gotcha: unrelated keys in the LLM response (e.g. a stray "unrelated" field) are silently dropped, not an error.
 
 ## Step 7 — main(): Where Everything Wires Together
-`load_data.py:70`
+`load_data.py:68`
 
-Situation: main() is the only place that touches Mongo, the PDF loader, the LLM, and Voyage. Mechanism: it loads pages, filters them, tags them sequentially (line 93 - sequential on purpose, LM Studio serves one request at a time locally), then splits and embeds. Implication: if you need to trace a real run end to end, this function is the whole story in ~45 lines. Gotcha: the MongoClient opened at line 71 is closed manually at line 114 - there's no context manager here.
+Situation: main() is the only place that touches Mongo, the PDF loader, the LLM, and Voyage. Mechanism: it loads pages, filters them, tags them sequentially (line 91 - sequential on purpose, LM Studio serves one request at a time locally), then splits and embeds. Implication: if you need to trace a real run end to end, this function is the whole story in ~45 lines. Gotcha: the MongoClient opened at line 69 is closed manually at line 112 - there's no context manager here.
 
 ## Step 8 — Stage 3: Batching for Rate Limits
 `load_data.py:62`

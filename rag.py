@@ -1,5 +1,6 @@
 import sys
-from typing import Any
+from collections.abc import Iterable
+from typing import Any, TextIO
 
 from pydantic import SecretStr
 from pymongo import MongoClient
@@ -41,6 +42,15 @@ def format_results(docs: list[Document]) -> str:
     )
 
 
+def stream_answer(chunks: Iterable[str], out: TextIO = sys.stdout) -> None:
+    """Echo tokens as the LLM produces them - flush per token or stdout buffers."""
+    for chunk in chunks:
+        out.write(chunk)
+        out.flush()
+    out.write("\n")
+    out.flush()
+
+
 def main() -> None:
     client: MongoClient[dict[str, Any]] = MongoClient(key_param.MONGODB_URI)
     vector_store = MongoDBAtlasVectorSearch(
@@ -75,11 +85,11 @@ def main() -> None:
             model=key_param.LLM_MODEL,
         )
     rag_chain = custom_rag_prompt | llm | StrOutputParser()
-    answer = rag_chain.invoke({
+    print("\nAnswer:")
+    stream_answer(rag_chain.stream({
         "context": "\n\n".join(d.page_content for d in docs),
         "question": query,
-    })
-    print(f"\nAnswer:\n{answer}")
+    }))
     client.close()
 
 

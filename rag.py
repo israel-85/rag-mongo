@@ -35,6 +35,7 @@ def format_context(docs: Iterable[Document]) -> str:
     """Join retrieved chunks into the prompt's context block - text only, no metadata."""
     return "\n\n".join(doc.page_content for doc in docs)
 
+
 def stream_answer(chunks: Iterable[str], out: TextIO = sys.stdout) -> None:
     """Echo tokens as the LLM produces them - flush per token or stdout buffers."""
     for chunk in chunks:

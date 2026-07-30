@@ -14,7 +14,7 @@ Situation: this is the retrieval half's map. Mechanism: it documents the 6-stage
 ## Step 2 — One Script, Same Shape as Ingest
 `rag.py:1`
 
-Situation: 90-line script, same convention as load_data.py. Mechanism: pure functions at module top level (`make_embeddings`, `resolve_query`, `format_context`, `stream_answer`); all I/O — MongoClient, Atlas, the LLM — confined to `main()` (line 47+), guarded by `if __name__ == "__main__"`. Implication: importing this module (as tests do) opens no MongoClient and pulls no PDF/ingest deps into the query path. Gotcha: don't move I/O out of main() or you break the two structural test guards that assert exactly this.
+Situation: 91-line script, same convention as load_data.py. Mechanism: pure functions at module top level (`make_embeddings`, `resolve_query`, `format_context`, `stream_answer`); all I/O — MongoClient, Atlas, the LLM — confined to `main()` (line 48+), guarded by `if __name__ == "__main__"`. Implication: importing this module (as tests do) opens no MongoClient and pulls no PDF/ingest deps into the query path. Gotcha: don't move I/O out of main() or you break the two structural test guards that assert exactly this.
 
 ## Step 3 — Resolving the Query
 `rag.py:28`
@@ -27,12 +27,12 @@ Situation: `resolve_query(argv)` decides what question gets asked. Mechanism: fi
 Situation: `make_embeddings()` builds the Voyage client used to embed the query. Mechanism: reads `EMBED_MODEL` from `config.py`, the same constant `load_data.py` uses to embed stored chunks. Implication: query and stored vectors must come from the same model or Atlas silently returns nothing/nonsense — no error, just bad results. Gotcha: this is exactly why `config.py` is its own module (see `CLAUDE.md` "Import cost") — importing from `load_data` here would drag `PyPDFLoader` into every query.
 
 ## Step 5 — Building the Retriever
-`rag.py:50`
+`rag.py:51`
 
 Situation: `main()` wires `MongoDBAtlasVectorSearch` against `INDEX_NAME` and turns it into a retriever. Mechanism: `search_kwargs` sets `k=TOP_K` (3), a `pre_filter` excluding `hasCode: True` chunks, and a `score_threshold` of 0.01. Implication: code-heavy chunks are filtered out before similarity ranking even runs — this is a hard filter, not a ranking signal. Gotcha: `INDEX_NAME` must match the actual Atlas Search index name (`"vector_index"`) and that index's `numDimensions` must match `EMBED_MODEL` — see the "Atlas vector index" section of `CLAUDE.md`.
 
 ## Step 6 — Retrieval Happens Once
-`rag.py:62`
+`rag.py:63`
 
 Situation: `docs = retriever.invoke(query)` is the single retrieval call for the whole run. Mechanism: the resulting `docs` list is handed to exactly one thing below — `format_context`. Implication: whatever changes retrieval quality (k, pre_filter, score_threshold) affects exactly one code path, easy to reason about. Gotcha: the retrieved chunk text is never printed — the console shows only the query and the streamed answer. A `format_results` snippet renderer used to print it and was deleted once `main()` stopped calling it.
 
@@ -42,12 +42,12 @@ Situation: `docs = retriever.invoke(query)` is the single retrieval call for the
 Situation: `format_context(docs)` turns the retrieved `Document` list into the prompt's `context` string. Mechanism: `"\n\n".join(doc.page_content for doc in docs)` — blank line between passages so the LLM doesn't read two chunks as one sentence. Implication: it's pure, so the "what does the model actually see" question is answerable by a unit test instead of a live run. Gotcha: only `page_content` goes in. The `title`/`keywords`/`hasCode` metadata that ingestion worked to attach is used for *filtering* (Step 5) and never shown to the LLM — if you want the model to cite titles, this is the function to change.
 
 ## Step 8 — Prompt Assembly, No RunnablePassthrough
-`rag.py:81`
+`rag.py:82`
 
-Situation: the LCEL chain is `custom_rag_prompt | llm | StrOutputParser()`. Mechanism: `main()` builds the `{"context": ..., "question": ...}` dict itself at the `.stream()` call site (`rag.py:83`) instead of using `RunnablePassthrough`. Implication: there's nothing to "pass through" — retrieval already happened, so the chain only needs to format and generate. Gotcha: if you see `RunnablePassthrough` missing and assume it's a bug, check `CLAUDE.md` first — it's deliberate, not an oversight.
+Situation: the LCEL chain is `custom_rag_prompt | llm | StrOutputParser()`. Mechanism: `main()` builds the `{"context": ..., "question": ...}` dict itself at the `.stream()` call site (`rag.py:84`) instead of using `RunnablePassthrough`. Implication: there's nothing to "pass through" — retrieval already happened, so the chain only needs to format and generate. Gotcha: if you see `RunnablePassthrough` missing and assume it's a bug, check `CLAUDE.md` first — it's deliberate, not an oversight.
 
 ## Step 9 — Streaming the Answer, Flush Is Load-Bearing
-`rag.py:38`
+`rag.py:39`
 
 Situation: `stream_answer(chunks, out)` writes each token from `rag_chain.stream()` as it arrives. Mechanism: `out.write(chunk)` then `out.flush()` after every single token, not just at the end. Implication: stdout is block-buffered when piped (not a TTY) — skip the per-token flush and the whole answer lands at once, the stream becomes invisible even though tokens are arriving one at a time. Gotcha: `out` defaults to `sys.stdout` but accepts anything with `write`/`flush` — that's what makes it testable without a real terminal (see next step).
 

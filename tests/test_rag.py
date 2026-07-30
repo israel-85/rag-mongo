@@ -57,13 +57,16 @@ def test_resolve_query_prefers_cli_argument():
 def test_resolve_query_falls_back_to_default():
     assert rag.resolve_query(["rag.py"]) == rag.DEFAULT_QUERY
 
+
 def test_resolve_query_ignores_empty_argument():
     """An empty arg is not a question - embedding it retrieves noise."""
     assert rag.resolve_query(["rag.py", ""]) == rag.DEFAULT_QUERY
 
+
 def test_resolve_query_ignores_blank_argument():
     """Same for whitespace-only - shell quoting makes this easy to hit by accident."""
     assert rag.resolve_query(["rag.py", "   "]) == rag.DEFAULT_QUERY
+
 
 def test_resolve_query_strips_surrounding_whitespace():
     """A padded query is still a query; the padding is not part of it."""
@@ -76,19 +79,23 @@ def test_format_context_joins_chunks_with_a_blank_line():
 
     assert rag.format_context(docs) == "first\n\nsecond"
 
+
 def test_format_context_handles_a_single_chunk():
     """One chunk means no separator at all - no leading or trailing blank line."""
     assert rag.format_context([Document(page_content="only")]) == "only"
 
+
 def test_format_context_handles_no_chunks():
     """Retrieval can return nothing; the prompt then tells the LLM to refuse."""
     assert rag.format_context([]) == ""
+
 
 def test_format_context_keeps_chunk_text_verbatim():
     """Only page_content reaches the prompt - metadata must not leak in."""
     docs = [Document(page_content="body", metadata={"title": "leak", "hasCode": True})]
 
     assert rag.format_context(docs) == "body"
+
 
 class RecordingStream:
     """Captures write/flush order so tests can prove output is not buffered."""

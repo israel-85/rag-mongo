@@ -7,7 +7,7 @@ Two-script RAG demo over MongoDB Atlas Vector Search.
 - **Ingest** (`load_data.py`): PDF → filter noise pages → LLM tag metadata →
   chunk → Voyage embed → Atlas.
 - **Retrieve** (`rag.py`): query → Voyage embed → Atlas vector search →
-  printed snippets.
+  streamed LLM answer. Retrieved chunk text is never printed.
 
 ## Tech Stack
 
@@ -19,14 +19,14 @@ Two-script RAG demo over MongoDB Atlas Vector Search.
 | Embeddings | Voyage AI (`voyage-3.5-lite`) |
 | LLM tagging | OpenAI-compatible local server (LM Studio) via `ChatOpenAI` |
 | Testing | pytest |
-| Dev tooling | ruff, vulture, pyright — run ephemerally via `uvx` / `npx` |
+| Dev tooling | ruff, vulture, pyright — run ephemerally via `uvx` so `.venv` stays as-is |
 
 No `requirements.txt` — deps live only in `.venv`. `pyproject.toml` holds
 pytest config only, not packaging metadata.
 
 ## Architecture
 
-Three modules, ~180 lines total. Both scripts follow the same convention:
+Three modules, ~230 lines total. Both scripts follow the same convention:
 pure logic extracted into top-level functions for unit testing, all side
 effects (Mongo/PDF/LLM/Voyage) confined to `main()` behind
 `if __name__ == "__main__":`, so importing a module triggers no network calls.
@@ -58,7 +58,11 @@ tests/test_rag.py       → retrieval unit tests + import-hygiene guards
 key_param.py            → gitignored secrets
 key_param.example.py    → secrets template
 sample_files/           → sample PDF input
-docs/testing/           → TDD evidence reports
+docs/ONBOARDING.md      → this file
+docs/CODE_TOUR.md       → ingestion walkthrough (load_data.py)
+docs/CODE_TOUR_RAG.md   → retrieval walkthrough (rag.py)
+docs/testing/           → TDD evidence reports (historical — record past state)
+.tours/                 → CodeTour JSON of the ingestion walkthrough
 ```
 
 ## Request/Data Lifecycle
@@ -83,12 +87,24 @@ docs/testing/           → TDD evidence reports
 
 ## Retrieval Lifecycle (`rag.py`)
 
-1. `resolve_query(argv)` — first CLI argument, else `DEFAULT_QUERY`.
+1. `resolve_query(argv)` — first CLI argument, stripped; blank or absent falls
+   back to `DEFAULT_QUERY`, so `python rag.py ""` does not embed an empty
+   string.
 2. `make_embeddings()` — Voyage client on the shared `EMBED_MODEL`.
 3. `main()` builds `MongoDBAtlasVectorSearch` against `vector_index` and
-   retrieves `TOP_K=3` chunks by similarity.
-4. `stream_answer(chunks)` — echoes the LLM's tokens as they arrive. Retrieved
-   chunk text is never printed; only the query and the answer are.
+   retrieves `TOP_K=3` chunks by similarity, excluding `hasCode: True` chunks.
+   The `score_threshold` in `search_kwargs` is inert — LangChain honours it
+   only for `search_type="similarity_score_threshold"`, and this code passes
+   `"similarity"`.
+4. `format_context(docs)` — joins chunk `page_content` with a blank line,
+   dropping fully blank chunks, so `""` always means "nothing to answer from".
+   Chunk metadata never reaches the prompt.
+5. `main()` refuses on empty context: prints `NO_CONTEXT_MESSAGE` and returns
+   without building the LLM. Structural, because a small local model may
+   ignore the prompt's "do not answer without context" instruction.
+6. `stream_answer(chunks)` — echoes the LLM's tokens as they arrive, flushing
+   per token. Retrieved chunk text is never printed; only the query and the
+   answer are.
 
 ## Gotcha: embedding dimensions
 
@@ -113,8 +129,11 @@ python load_data.py                      # run the ingestion pipeline
 python rag.py                            # query with the demo question
 python rag.py "how does sharding work?"  # query with your own
 pytest tests/ -v                         # run unit tests
+pytest tests/ --cov=rag --cov=load_data --cov-report=term-missing   # coverage
 uvx ruff check .                         # lint without touching .venv
-npx pyright                              # type check
+uvx ruff check --preview --select E301,E302,E303,E305 .   # blank-line spacing
+uvx pyright                              # type check (uvx, not npx)
+uvx vulture . --exclude .venv            # dead-code scan
 ```
 
 ## Where to Look
@@ -127,6 +146,8 @@ npx pyright                              # type check
 | Change batching/rate-limit behavior | `make_batches`, `EMBED_BATCH_SIZE`, `EMBED_BATCH_SLEEP_SECONDS` |
 | Change what a query returns | `TOP_K` / retriever `search_kwargs` in `rag.py` |
 | Change the query source | `resolve_query` in `rag.py` |
+| Change what the LLM sees as context | `format_context` in `rag.py` |
+| Change the no-results behavior | `NO_CONTEXT_MESSAGE` + the guard in `main()`, `rag.py` |
 | Switch embedding model | `EMBED_MODEL` in `config.py` — **and** the Atlas index dimensions |
 | Add a test | `tests/test_load_data.py` or `tests/test_rag.py`, fixtures in `tests/conftest.py` |
 | Update secrets shape | `key_param.example.py` |

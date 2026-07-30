@@ -32,7 +32,8 @@ pytest tests/ --cov=rag --cov=load_data --cov-report=term-missing   # coverage
 running the model named in `LLM_MODEL`. Only ingestion uses it — retrieval never calls the LLM.
 
 Dev tooling is run ephemerally so the `.venv` stays as-is: `uvx ruff check`, `uvx vulture`,
-`npx pyright` (config in `pyrightconfig.json`).
+`uvx pyright` (config in `pyrightconfig.json`). Use `uvx`, not `npx` — `npx pyright` resolves to
+something else on at least one dev machine and fails with `Unknown command: "pyright"`.
 
 ## Shared config (`config.py`)
 

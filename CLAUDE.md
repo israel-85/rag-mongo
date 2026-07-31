@@ -92,7 +92,10 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
    on-topic top-1 scores stayed ≥0.79 and off-topic top-1 scores stayed ≤0.70 across 6 probe
    queries (3 on/adjacent-topic, 3 off-topic controls). `search_type` and `search_kwargs` must
    agree, or the threshold is silently dropped instead of applied — see the CODE_TOUR_RAG.md
-   Step 5 gotcha for how that failure mode looks when it happens.
+   Step 5 gotcha for how that failure mode looks when it happens. If the first pass comes back
+   empty, `main()` retries once with `retriever_config(relaxed=True)` (`score_threshold: 0.71`,
+   just above the highest off-topic score seen in calibration) before giving up — a genuine
+   near-miss gets a second chance without reopening the door to noise.
 4. `format_context(docs)` — joins the retrieved chunks with a blank line into the prompt's
    `context`. Only `page_content` is used; chunk metadata (`title`, `keywords`, `hasCode`) is
    deliberately left out of the prompt. Blank chunks are dropped rather than joined, so `""` always

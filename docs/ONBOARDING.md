@@ -96,7 +96,9 @@ docs/testing/           → TDD evidence reports (historical — record past sta
    `hasCode: True` chunks, `search_type="similarity_score_threshold"` with
    `score_threshold=0.75`. Calibrated against a live probe: on-topic queries
    scored ≥0.79, off-topic controls stayed ≤0.70. `search_type` and
-   `search_kwargs` must agree or the threshold is silently ignored.
+   `search_kwargs` must agree or the threshold is silently ignored. An empty
+   first pass triggers one retry at `retriever_config(relaxed=True)`
+   (`score_threshold=0.71`) before `main()` gives up.
 4. `format_context(docs)` — joins chunk `page_content` with a blank line,
    dropping fully blank chunks, so `""` always means "nothing to answer from".
    Chunk metadata never reaches the prompt.

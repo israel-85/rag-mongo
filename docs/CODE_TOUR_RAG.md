@@ -46,6 +46,16 @@ Situation: `format_context(docs)` turns the retrieved `Document` list into the p
 
 Situation: when the primary pass's `format_context` comes back empty, `main()` doesn't refuse immediately — it retries once at `retriever_config(relaxed=True)` (`score_threshold: RELAXED_SCORE_THRESHOLD`, 0.71) before giving up. Only if *that* also comes back empty does it print `NO_CONTEXT_MESSAGE` and return, before the prompt or `ChatOpenAI` is built. Mechanism: two sequential `if not context:` checks (`rag.py:91` and `rag.py:98`), the first doing a second `retriever_config()`/`as_retriever()`/`invoke()` round, the second the actual early return. Implication: the refusal is still structural — the prompt's "do not answer without context" line is a backstop a small local model can ignore, not the primary guard — but it's no longer trigger-happy on a single below-threshold pass. `0.71` was chosen deliberately close to the primary `0.75`: it sits just above the highest off-topic score seen in calibration (0.7025, Step 5), so the retry can rescue a genuine near-miss without meaningfully reopening the door to noise. Gotcha: an empty *final* result now has three possible causes — a setup problem (ingestion never run, wrong `INDEX_NAME`, `numDimensions` mismatch), a query correctly rejected by both passes as off-topic, or (rarest) a borderline on-topic query that missed even the relaxed threshold. `NO_CONTEXT_MESSAGE` still points at ingestion/index state, which fits the first cause and is an over-steer for the other two — don't assume every refusal means something is broken. The retry itself prints a one-line notice to stdout, so a relaxed-pass rescue is visible, not silent.
 
+**Worked example** — live-tested 2026-07-30 against the 171-chunk corpus, all three outcomes hit on purpose:
+
+| Query | Primary (0.75) | Retry notice | Relaxed (0.71) | Result |
+|---|---|---|---|---|
+| "how does sharding work?" | hit (0.80) | — | — | straight through, no log line |
+| "how does eventual consistency work?" | miss (0.7193) — LangChain logs `No relevant docs were retrieved using the relevance score threshold 0.75` | fires | **hit** — no second LangChain warning | rescued, reaches the LLM |
+| "how do I crochet a scarf?" | miss (0.7025) | fires | miss (0.7025 < 0.71) — LangChain logs the warning again, this time at 0.71 | `NO_CONTEXT_MESSAGE` |
+
+The middle row is the rescue case this whole step exists for: `0.7193` sits inside the gap by design — above `RELAXED_SCORE_THRESHOLD` (0.71), below `SCORE_THRESHOLD` (0.75). The tell that a rescue happened, versus a full refusal, is the *absence* of a second `No relevant docs were retrieved` line — one warning means the relaxed pass found something, two means it didn't either.
+
 ## Step 9 — Prompt Assembly, No RunnablePassthrough
 `rag.py:120`
 

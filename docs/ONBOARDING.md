@@ -92,10 +92,11 @@ docs/testing/           → TDD evidence reports (historical — record past sta
    string.
 2. `make_embeddings()` — Voyage client on the shared `EMBED_MODEL`.
 3. `main()` builds `MongoDBAtlasVectorSearch` against `vector_index` and
-   retrieves `TOP_K=3` chunks by similarity, excluding `hasCode: True` chunks.
-   The `score_threshold` in `search_kwargs` is inert — LangChain honours it
-   only for `search_type="similarity_score_threshold"`, and this code passes
-   `"similarity"`.
+   retrieves via `retriever_config()` — `k=TOP_K` (3), excluding
+   `hasCode: True` chunks, `search_type="similarity_score_threshold"` with
+   `score_threshold=0.75`. Calibrated against a live probe: on-topic queries
+   scored ≥0.79, off-topic controls stayed ≤0.70. `search_type` and
+   `search_kwargs` must agree or the threshold is silently ignored.
 4. `format_context(docs)` — joins chunk `page_content` with a blank line,
    dropping fully blank chunks, so `""` always means "nothing to answer from".
    Chunk metadata never reaches the prompt.

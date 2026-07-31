@@ -45,6 +45,15 @@ def format_context(docs: Iterable[Document]) -> str:
     return "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
 
 
+def retriever_config() -> tuple[str, dict[str, Any]]:
+    """search_type must be similarity_score_threshold or score_threshold is silently ignored."""
+    return "similarity_score_threshold", {
+        "k": TOP_K,
+        "pre_filter": {"hasCode": {"$eq": False}},
+        "score_threshold": 0.75,
+    }
+
+
 def stream_answer(chunks: Iterable[str], out: TextIO = sys.stdout) -> None:
     """Echo tokens as the LLM produces them - flush per token or stdout buffers."""
     for chunk in chunks:
@@ -63,10 +72,8 @@ def main() -> None:
             index_name=INDEX_NAME,
         )
 
-        retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": TOP_K,
-                    "pre_filter": { "hasCode": { "$eq": False } },
-                    "score_threshold": 0.01
-    })
+        search_type, search_kwargs = retriever_config()
+        retriever = vector_store.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
         query = resolve_query(sys.argv)
         print(f"Query: {query}\n")
         docs = retriever.invoke(query)

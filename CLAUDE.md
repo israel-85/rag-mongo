@@ -86,11 +86,13 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
    otherwise embed an empty string and retrieve noise rather than nothing.
 2. `make_embeddings()` — Voyage client on `EMBED_MODEL`. Must stay in sync with ingestion; that is
    what `config.EMBED_MODEL` is for.
-3. `main()` builds `MongoDBAtlasVectorSearch` against `INDEX_NAME` and retrieves `TOP_K=3` chunks
-   by similarity. Note that the `score_threshold` in `search_kwargs` is **inert**: LangChain only
-   honours it for `search_type="similarity_score_threshold"`, and this code passes
-   `search_type="similarity"`. It is kept as a marker for the intended behaviour — do not assume
-   weak matches are being filtered out today.
+3. `main()` builds `MongoDBAtlasVectorSearch` against `INDEX_NAME` and retrieves via
+   `retriever_config()`, which sets `search_type="similarity_score_threshold"` and
+   `score_threshold: 0.75` — calibrated 2026-07-30 against the live 171-chunk corpus, where
+   on-topic top-1 scores stayed ≥0.79 and off-topic top-1 scores stayed ≤0.70 across 6 probe
+   queries (3 on/adjacent-topic, 3 off-topic controls). `search_type` and `search_kwargs` must
+   agree, or the threshold is silently dropped instead of applied — see the CODE_TOUR_RAG.md
+   Step 5 gotcha for how that failure mode looks when it happens.
 4. `format_context(docs)` — joins the retrieved chunks with a blank line into the prompt's
    `context`. Only `page_content` is used; chunk metadata (`title`, `keywords`, `hasCode`) is
    deliberately left out of the prompt. Blank chunks are dropped rather than joined, so `""` always

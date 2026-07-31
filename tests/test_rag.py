@@ -50,6 +50,16 @@ def test_embeddings_match_ingest_model():
     assert (rag.DB_NAME, rag.COLLECTION_NAME) == (config.DB_NAME, config.COLLECTION_NAME)
 
 
+def test_retriever_config_activates_the_score_threshold():
+    """search_type must match search_kwargs, or score_threshold is silently ignored."""
+    search_type, search_kwargs = rag.retriever_config()
+
+    assert search_type == "similarity_score_threshold"
+    assert search_kwargs["score_threshold"] == 0.75
+    assert search_kwargs["k"] == rag.TOP_K
+    assert search_kwargs["pre_filter"] == {"hasCode": {"$eq": False}}
+
+
 def test_resolve_query_prefers_cli_argument():
     assert rag.resolve_query(["rag.py", "how do indexes work?"]) == "how do indexes work?"
 

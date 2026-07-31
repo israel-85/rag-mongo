@@ -60,6 +60,17 @@ def test_retriever_config_activates_the_score_threshold():
     assert search_kwargs["pre_filter"] == {"hasCode": {"$eq": False}}
 
 
+def test_retriever_config_relaxed_lowers_only_the_threshold():
+    """The retry pass must widen recall without touching k or the hasCode filter."""
+    _, primary = rag.retriever_config()
+    search_type, relaxed = rag.retriever_config(relaxed=True)
+
+    assert search_type == "similarity_score_threshold"
+    assert relaxed["score_threshold"] < primary["score_threshold"]
+    assert relaxed["k"] == primary["k"]
+    assert relaxed["pre_filter"] == primary["pre_filter"]
+
+
 def test_resolve_query_prefers_cli_argument():
     assert rag.resolve_query(["rag.py", "how do indexes work?"]) == "how do indexes work?"
 

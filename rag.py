@@ -45,12 +45,21 @@ def format_context(docs: Iterable[Document]) -> str:
     return "\n\n".join(doc.page_content for doc in docs if doc.page_content.strip())
 
 
-def retriever_config() -> tuple[str, dict[str, Any]]:
-    """search_type must be similarity_score_threshold or score_threshold is silently ignored."""
+SCORE_THRESHOLD = 0.75
+RELAXED_SCORE_THRESHOLD = 0.71
+
+
+def retriever_config(relaxed: bool = False) -> tuple[str, dict[str, Any]]:
+    """search_type must be similarity_score_threshold or score_threshold is silently ignored.
+
+    relaxed=True is the retry pass after an empty first result - it lowers only the
+    threshold, to just above the highest off-topic score seen in calibration (0.7025),
+    so a genuine near-miss can still surface without reopening the door to noise.
+    """
     return "similarity_score_threshold", {
         "k": TOP_K,
         "pre_filter": {"hasCode": {"$eq": False}},
-        "score_threshold": 0.75,
+        "score_threshold": RELAXED_SCORE_THRESHOLD if relaxed else SCORE_THRESHOLD,
     }
 
 
@@ -78,6 +87,14 @@ def main() -> None:
         print(f"Query: {query}\n")
         docs = retriever.invoke(query)
         context = format_context(docs)
+
+        if not context:
+            print("No hits above the primary threshold - retrying with a relaxed one.")
+            search_type, search_kwargs = retriever_config(relaxed=True)
+            retriever = vector_store.as_retriever(search_type=search_type, search_kwargs=search_kwargs)
+            docs = retriever.invoke(query)
+            context = format_context(docs)
+
         if not context:
             print(NO_CONTEXT_MESSAGE)
             return

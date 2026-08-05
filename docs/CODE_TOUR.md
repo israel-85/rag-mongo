@@ -17,37 +17,37 @@ Situation: this is the whole repo's map in one file. Mechanism: it documents set
 Situation: the entire pipeline lives in a single 115-line script. Mechanism: pure logic is extracted into top-level functions (lines 41-67); all I/O - Mongo, PDF, LLM, Voyage - is confined to main() (line 70+), guarded by if __name__ == "__main__". Implication: importing this module (as tests do) never makes a network call. Gotcha: don't add side effects to the top-level functions or you break that guarantee.
 
 ## Step 3 — Stage 1: Filter Noise Pages
-`load_data.py:39`
+`load_data.py:61`
 
 Situation: raw PDF pages come in via PyPDFLoader, many are front matter or noise. Mechanism: filter_pages drops any page with 20 or fewer words. Implication: this is the cheapest filter in the pipeline - runs before the expensive LLM tagging step. Gotcha: threshold is a strict > 20, not >=, so a 20-word page is dropped (see the test at line 7 of test_load_data.py).
 
 ## Step 4 — The Tagging Schema
-`load_data.py:22`
+`load_data.py:44`
 
 Situation: this JSON schema defines what metadata gets extracted per page - title, keywords, hasCode. Mechanism: passed to ChatOpenAI.with_structured_output(schema, method="json_schema") at line 89. Implication: json_schema method is used (not function/tool calling) because the local LM Studio server only supports the former. Gotcha: if you add a field here, also update merge_tags's consumers - it only merges keys that exist in schema["properties"].
 
 ## Step 5 — Stage 2: LLM Tagging, Fails Soft
-`load_data.py:52`
+`load_data.py:74`
 
 Situation: tag_page calls the LLM tagger on a single page's content. Mechanism: on any exception it prints a warning and returns the original untagged page instead of raising. Implication: enrichment is best-effort - one bad LLM response never aborts the whole ingest run. Gotcha: this swallows ALL exceptions broadly, including bugs in tagger setup - if tagging silently stops working, check this catch block first, not just the LLM server.
 
 ## Step 6 — Merging Tags Into Metadata
-`load_data.py:44`
+`load_data.py:66`
 
 Situation: merge_tags combines LLM output with the page's existing metadata. Mechanism: it returns a *new* Document (page_content and metadata are never mutated in place), keeping only keys present in the schema. Implication: this immutability is what makes tag_page and merge_tags trivially unit-testable with plain equality checks. Gotcha: unrelated keys in the LLM response (e.g. a stray "unrelated" field) are silently dropped, not an error.
 
 ## Step 7 — main(): Where Everything Wires Together
-`load_data.py:68`
+`load_data.py:169`
 
 Situation: main() is the only place that touches Mongo, the PDF loader, the LLM, and Voyage. Mechanism: it loads pages, filters them, tags them sequentially (line 91 - sequential on purpose, LM Studio serves one request at a time locally), then splits and embeds. Implication: if you need to trace a real run end to end, this function is the whole story in ~45 lines. Gotcha: the MongoClient opened at line 69 is closed manually at line 112 - there's no context manager here.
 
 ## Step 8 — Stage 3: Batching for Rate Limits
-`load_data.py:62`
+`load_data.py:84`
 
 Situation: make_batches slices the chunked documents into groups before embedding. Mechanism: plain generator, yields batch_size-sized slices, last batch may be smaller. Implication: exists solely to respect Voyage's free-tier limit (3 req/min, 10K tokens/min) - see EMBED_BATCH_SIZE=50 and EMBED_BATCH_SLEEP_SECONDS=25 at lines 18-19. Gotcha: don't remove the sleep between batches (line 111) without first checking the current Voyage tier - it's the only thing preventing rate-limit errors.
 
 ## Step 9 — Stage 4 & 5: Embed and Upsert in Throttled Batches
-`load_data.py:104`
+`load_data.py:217`
 
 Situation: this loop is the actual embedding + storage step. Mechanism: for each batch, vector_store.add_documents() embeds via Voyage and upserts into MongoDBAtlasVectorSearch, then sleeps unless it's the last batch. Implication: progress is printed per batch (stored_so_far/total) so a long run is observable. Gotcha: stored_so_far is a running counter, not recomputed each iteration - a leftover comment from a prior O(n²) version may still reference summing batches; trust the += here.
 

@@ -39,8 +39,12 @@ effects (Mongo/PDF/LLM/Voyage) confined to `main()` behind
 ## Key Entry Points
 
 - **Ingest script**: `load_data.py` — run via `python load_data.py`
+  (`--fresh` to wipe first, or pass a different PDF path)
 - **Query script**: `rag.py` — run via `python rag.py "your question"`
-- **Shared settings**: `config.py` — `DB_NAME`, `COLLECTION_NAME`, `EMBED_MODEL`
+- **Eval harness**: `evaluation/run_eval.py` — `python -m evaluation.run_eval`
+- **Threshold calibration**: `evaluation/calibrate.py` — `python -m evaluation.calibrate`
+- **Shared settings**: `config.py` — `DB_NAME`, `COLLECTION_NAME`, `EMBED_MODEL`,
+  `VECTOR_INDEX_NAME`, `FULLTEXT_INDEX_NAME`, `TEXT_KEY`, `require_secrets()`
 - **Secrets**: `key_param.py` (gitignored) — `MONGODB_URI`, `VOYAGE_API_KEY`,
   `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`
 - **Secrets template**: `key_param.example.py`
@@ -49,16 +53,24 @@ effects (Mongo/PDF/LLM/Voyage) confined to `main()` behind
 ## Directory Map
 
 ```
-config.py               → DB_NAME, COLLECTION_NAME, EMBED_MODEL (shared by both scripts)
+config.py               → shared names, index names, TEXT_KEY, require_secrets()
 load_data.py            → ingest: pure fns top-level, side effects in main()
 rag.py                  → retrieval: pure fns top-level, side effects in main()
+evaluation/metrics.py   → hit_rate / mrr / abstention_rate (pure, no I/O)
+evaluation/golden.json  → 22 golden questions + ground-truth pages
+evaluation/run_eval.py  → live retrieval scoring (needs Atlas + Voyage)
+evaluation/calibrate.py → rerank score distribution, for setting thresholds
 tests/conftest.py       → mocked LLM/Document fixtures
 tests/test_load_data.py → ingest unit tests
 tests/test_rag.py       → retrieval unit tests + import-hygiene guards
+tests/test_config.py    → secret validation + docs/template drift guards
+tests/test_metrics.py   → metric scoring + golden.json validation
 key_param.py            → gitignored secrets
 key_param.example.py    → secrets template
 sample_files/           → sample PDF input
 docs/ONBOARDING.md      → this file
+docs/CONTRIBUTING.md    → setup, commands, quality gates, PR checklist
+docs/RUNBOOK.md         → Atlas index state, procedures, troubleshooting
 docs/CODE_TOUR.md       → ingestion walkthrough (load_data.py)
 docs/CODE_TOUR_RAG.md   → retrieval walkthrough (rag.py)
 docs/testing/           → TDD evidence reports (historical — record past state)
@@ -91,23 +103,40 @@ docs/testing/           → TDD evidence reports (historical — record past sta
    back to `DEFAULT_QUERY`, so `python rag.py ""` does not embed an empty
    string.
 2. `make_embeddings()` — Voyage client on the shared `EMBED_MODEL`.
-3. `main()` builds `MongoDBAtlasVectorSearch` against `vector_index` and
-   retrieves via `retriever_config()` — `k=TOP_K` (3), excluding
-   `hasCode: True` chunks, `search_type="similarity_score_threshold"` with
-   `score_threshold=0.75`. Calibrated against a live probe: on-topic queries
-   scored ≥0.79, off-topic controls stayed ≤0.70. `search_type` and
-   `search_kwargs` must agree or the threshold is silently ignored. An empty
-   first pass triggers one retry at `retriever_config(relaxed=True)`
-   (`score_threshold=0.71`) before `main()` gives up.
-4. `format_context(docs)` — joins chunk `page_content` with a blank line,
-   dropping fully blank chunks, so `""` always means "nothing to answer from".
-   Chunk metadata never reaches the prompt.
-5. `main()` refuses on empty context: prints `NO_CONTEXT_MESSAGE` and returns
+3. `build_candidate_retriever()` casts a wide net — `CANDIDATE_K` (20)
+   candidates from `MongoDBAtlasHybridSearchRetriever`, which runs vector search
+   and full-text search and fuses the two ranked lists by Reciprocal Rank Fusion.
+   Falls back to vector-only if the `text_index` full-text index is missing.
+   No `score_threshold` and no `pre_filter` here on purpose: this stage owns
+   recall, and gating it would cap what the reranker can ever see.
+4. `score_candidates()` scores those 20 with Voyage `rerank-2.5` in one call;
+   `keep_above()` keeps the `TOP_K` (3) clearing `RERANK_THRESHOLD` (0.55). An
+   empty result triggers one retry at `RELAXED_RERANK_THRESHOLD` (0.45) —
+   re-filtering the *same* scores, not re-querying and not re-scoring. Both
+   numbers come from `python -m evaluation.calibrate`, which measured a clean
+   gap: highest off-topic control 0.4023, lowest answerable question 0.6875.
+5. `format_context(docs)` — numbers each chunk and labels it `mongodb.pdf p.24`
+   so the answer is traceable, dropping fully blank chunks so `""` always means
+   "nothing to answer from". Only `source`/`page` ride along; the LLM-extracted
+   `title`/`keywords`/`hasCode` tags never reach the prompt.
+6. `main()` refuses on empty context: prints `NO_CONTEXT_MESSAGE` and returns
    without building the LLM. Structural, because a small local model may
    ignore the prompt's "do not answer without context" instruction.
-6. `stream_answer(chunks)` — echoes the LLM's tokens as they arrive, flushing
-   per token. Retrieved chunk text is never printed; only the query and the
-   answer are.
+7. `stream_answer(chunks)` — echoes the LLM's tokens as they arrive, flushing
+   per token, then `format_sources(docs)` prints the citation key. Retrieved
+   chunk *text* is never printed; only the query, the answer, and the labels.
+
+**Before changing anything in this path, measure it.** Retrieval fails silently
+— a wrong chunk produces a fluent, confident, wrong answer with no exception and
+no failing test. `python -m evaluation.run_eval --verbose` scores 22 golden
+questions. Watch `hit_rate` and `abstention_rate` together; they trade against
+each other and either alone will flatter a regression:
+
+| | hit_rate | mrr | abstention_rate |
+|---|---|---|---|
+| vector threshold 0.75/0.71 + `hasCode` filter, k=3 | 0.389 | 0.389 | 1.000 |
+| hybrid + rerank, uncalibrated floor (0.5) | 1.000 | 1.000 | 0.250 |
+| hybrid + rerank, calibrated floor (0.55) | 1.000 | 1.000 | 1.000 |
 
 ## Gotcha: embedding dimensions
 

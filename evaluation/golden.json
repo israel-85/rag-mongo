@@ -1,0 +1,100 @@
+{
+  "_comment": [
+    "Golden questions for sample_files/mongodb.pdf (The Little MongoDB Book, 36 pages).",
+    "expected_pages holds the 0-indexed PDF pages that actually answer the question,",
+    "matching the `page` metadata PyPDFLoader puts on every chunk.",
+    "An empty expected_pages marks an off-topic control: the corpus cannot answer it,",
+    "so retrieving nothing is the correct outcome and is scored as abstention.",
+    "Regenerate expected_pages if the source PDF is ever replaced."
+  ],
+  "questions": [
+    {
+      "question": "How do I create an index in MongoDB?",
+      "expected_pages": [24]
+    },
+    {
+      "question": "How do I make an index unique?",
+      "expected_pages": [24]
+    },
+    {
+      "question": "What does the $inc update operator do?",
+      "expected_pages": [12]
+    },
+    {
+      "question": "What is an upsert and when does it insert instead of update?",
+      "expected_pages": [12, 13]
+    },
+    {
+      "question": "How do I update more than one document at a time?",
+      "expected_pages": [13]
+    },
+    {
+      "question": "What does $unwind do in an aggregation pipeline?",
+      "expected_pages": [17]
+    },
+    {
+      "question": "How do I answer top-N questions with the aggregation framework?",
+      "expected_pages": [17]
+    },
+    {
+      "question": "When did MongoDB begin supporting multi-document transactions?",
+      "expected_pages": [31, 32]
+    },
+    {
+      "question": "What is a two-phase commit and why would I use one?",
+      "expected_pages": [32]
+    },
+    {
+      "question": "How does sharding work in MongoDB?",
+      "expected_pages": [33]
+    },
+    {
+      "question": "What are change streams used for?",
+      "expected_pages": [33]
+    },
+    {
+      "question": "What is a capped collection?",
+      "expected_pages": [31]
+    },
+    {
+      "question": "When did MongoDB enable journaling by default?",
+      "expected_pages": [31]
+    },
+    {
+      "question": "Why does MongoDB have limited support for joins?",
+      "expected_pages": [19, 20]
+    },
+    {
+      "question": "What is denormalization and why is it common in NoSQL?",
+      "expected_pages": [21]
+    },
+    {
+      "question": "What is an ObjectId?",
+      "expected_pages": [7, 9, 10]
+    },
+    {
+      "question": "How do I sort and limit query results?",
+      "expected_pages": [15, 16]
+    },
+    {
+      "question": "What is the difference between a database and a collection?",
+      "expected_pages": [5]
+    },
+    {
+      "question": "How do I configure a Kubernetes ingress controller with TLS?",
+      "expected_pages": []
+    },
+    {
+      "question": "What is the best way to train a convolutional neural network?",
+      "expected_pages": []
+    },
+    {
+      "question": "How do I bake sourdough bread at high altitude?",
+      "expected_pages": []
+    },
+    {
+      "question": "What are the tax implications of a Roth IRA conversion?",
+      "expected_pages": []
+    }
+  ]
+}

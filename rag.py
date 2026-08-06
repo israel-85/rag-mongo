@@ -12,6 +12,7 @@ from langchain_openai import ChatOpenAI
 from langchain_voyageai import VoyageAIEmbeddings
 from pydantic import SecretStr
 from pymongo import MongoClient
+from tenacity import Retrying, stop_after_attempt, wait_exponential
 
 import key_param
 from config import (
@@ -114,6 +115,53 @@ RERANK_THRESHOLD = 0.55
 RELAXED_RERANK_THRESHOLD = 0.45
 
 
+# Both network calls in the query path retry with the same policy. The numbers come
+# from evaluation/run_eval.py, where they were proven against this exact Voyage free
+# tier (3 requests/min): a query costs two Voyage requests, so a 429 is the routine
+# failure here, not the exceptional one. A slow answer beats a traceback.
+RETRIEVE_MAX_ATTEMPTS = 8
+RETRIEVE_RETRY_WAIT_MULTIPLIER = 10
+RETRIEVE_RETRY_MAX_WAIT_SECONDS = 90
+
+
+def _report_retry(state: Any) -> None:
+    """Say why the answer is slow, so a rate limit is visible rather than a hang.
+
+    A near-copy of load_data._report_retry, deliberately not imported: rag.py must
+    not pull in the ingest module, which drags PyPDFLoader and langchain_community
+    into the query path. tests/test_rag.py guards that boundary.
+    """
+    sleep = getattr(state.next_action, "sleep", 0)
+    error = state.outcome.exception()
+    print(
+        f"  retrieval call failed ({type(error).__name__}: {error}); "
+        f"attempt {state.attempt_number}/{RETRIEVE_MAX_ATTEMPTS}, retrying in {sleep:.0f}s"
+    )
+
+
+def _retryer() -> Retrying:
+    """A fresh backoff policy per call.
+
+    Fresh rather than a module-level singleton for two reasons: a Retrying instance
+    carries per-run state, and building it here means the wait constants are read at
+    call time - which is what lets tests set the multiplier to 0 instead of sleeping
+    through a real 90-second backoff.
+
+    reraise=True so an exhausted retry surfaces the original error. Swallowing it
+    would return no documents, and "retrieval is broken" would become indistinguishable
+    from "the corpus has no answer" - the exact silent failure NO_CONTEXT_MESSAGE exists
+    to make loud.
+    """
+    return Retrying(
+        stop=stop_after_attempt(RETRIEVE_MAX_ATTEMPTS),
+        wait=wait_exponential(
+            multiplier=RETRIEVE_RETRY_WAIT_MULTIPLIER, max=RETRIEVE_RETRY_MAX_WAIT_SECONDS
+        ),
+        before_sleep=_report_retry,
+        reraise=True,
+    )
+
+
 def retriever_config(candidate_k: int = CANDIDATE_K) -> tuple[str, dict[str, Any]]:
     """Cast a wide net - this stage owns recall, the reranker owns precision.
 
@@ -199,12 +247,19 @@ def score_candidates(
     Separate from the threshold so a caller trying two floors pays for one request.
     Scores are deterministic for a given query and candidate set, so re-scoring to
     apply a lower floor would buy nothing and cost a paid round-trip.
+
+    The empty-docs guard sits above the retry on purpose: a call that never happens
+    should not spend retry budget.
     """
     if not docs:
         return []
 
-    response = reranker.rerank(
-        query, [doc.page_content for doc in docs], model=RERANK_MODEL, top_k=top_k
+    response = _retryer()(
+        reranker.rerank,
+        query,
+        [doc.page_content for doc in docs],
+        model=RERANK_MODEL,
+        top_k=top_k,
     )
     return [(docs[result.index], result.relevance_score) for result in response.results]
 
@@ -239,9 +294,13 @@ def retrieve(
     net being too small - and re-scoring to lower a floor would pay twice for an
     identical answer.
 
-    The eval harness calls this, not main(), so what is measured is what runs.
+    Both network calls retry with backoff (see _retryer). Retriever construction stays
+    outside the retry: it is a cached index lookup, not the flaky part.
+
+    The eval harness calls this, not main(), so what is measured is what runs - and
+    since the backoff now lives here, the harness inherits it instead of wrapping it.
     """
-    candidates = build_candidate_retriever(vector_store).invoke(query)
+    candidates = _retryer()(build_candidate_retriever(vector_store).invoke, query)
     scored = score_candidates(query, candidates, reranker)
 
     for threshold in (RERANK_THRESHOLD, RELAXED_RERANK_THRESHOLD):

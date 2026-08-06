@@ -23,13 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import key_param
 import rag
-from evaluation.run_eval import load_golden, with_backoff
-
-
-def _top_score(vector_store, query: str, reranker) -> float:
-    candidates = rag.build_candidate_retriever(vector_store).invoke(query)
-    scored = rag.score_candidates(query, candidates, reranker, top_k=1)
-    return max((score for _, score in scored), default=0.0)
+from evaluation.run_eval import load_golden
 
 
 def top_score(vector_store, query: str, reranker) -> float:
@@ -38,8 +32,14 @@ def top_score(vector_store, query: str, reranker) -> float:
     Goes through rag.score_candidates so calibration measures the same scoring path
     retrieval uses. A calibration that scored differently from production would
     produce thresholds that are precisely wrong.
+
+    score_candidates brings its own backoff; the Atlas query is spelled out here
+    rather than reused from rag.retrieve because calibration wants top_k=1, so it
+    borrows rag's retry policy to get the same protection.
     """
-    return with_backoff(_top_score, vector_store, query, reranker)
+    candidates = rag._retryer()(rag.build_candidate_retriever(vector_store).invoke, query)
+    scored = rag.score_candidates(query, candidates, reranker, top_k=1)
+    return max((score for _, score in scored), default=0.0)
 
 
 def report(answerable: list[tuple[str, float]], controls: list[tuple[str, float]]) -> str:

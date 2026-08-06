@@ -136,6 +136,15 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
    re-scoring, since rerank scores are deterministic and a second call would pay twice for an
    identical answer. The second chance is about the gate being strict, never the net being small.
 
+   Both network calls — the Atlas candidate query and the Voyage rerank — go through `_retryer()`
+   (`RETRIEVE_MAX_ATTEMPTS=8`, exponential to 90s), with `_report_retry` printing each attempt so a
+   rate limit reads as a slow answer rather than a hang. A query costs two Voyage requests against
+   a 3 RPM free tier, so a 429 is the routine failure, not the exceptional one. `reraise=True` is
+   load-bearing: swallowing an exhausted retry would return no documents, making "retrieval is
+   broken" indistinguishable from "the corpus has no answer" — the exact silent failure
+   `NO_CONTEXT_MESSAGE` exists to make loud. Retriever *construction* stays outside the retry,
+   being a cached index lookup rather than the flaky part.
+
    Three deliberate deletions from the old design, all of which cost recall:
    - **No `score_threshold` at the vector stage.** Gating there caps what the reranker can ever
      see, which defeats retrieving 20 instead of 3. The old `0.75`/`0.71` numbers do **not** carry
@@ -191,9 +200,10 @@ after any retrieval change (threshold, reranker, filter, hybrid).
   separately on purpose: lowering a threshold always lifts `hit_rate` while quietly wrecking
   `abstention_rate`, and a single number hides that trade.
 - `evaluation/run_eval.py` — live runner (`python -m evaluation.run_eval --verbose --json out.json`).
-  Calls `rag.retrieve` directly, so what is measured is what runs. Wraps each question in backoff
-  because two Voyage requests per question against a 3 RPM free tier makes 429s routine, and a
-  crash at question 4 voids a fifteen-minute run.
+  Calls `rag.retrieve` directly, so what is measured is what runs — including its backoff. The
+  harness used to own a `with_backoff` wrapper of its own; that protected the measurement while
+  leaving the thing users actually run bare, so it moved into `rag.py` and the wrapper was deleted
+  rather than nested.
 - `evaluation/calibrate.py` — prints the top reranker score per question, split answerable vs
   control, and reports whether a gap exists. This is how the two thresholds get set. If the two
   groups ever overlap, no threshold separates them and the fix is better retrieval or a better
@@ -223,7 +233,9 @@ refusing 61% of questions the corpus could actually answer.
   typo in ground truth silently corrupts every metric.
 - `tests/test_rag.py` covers `resolve_query`, `format_context`, `format_sources`, `citation_label`,
   `score_candidates`, `keep_above`, `retrieve` (including that it scores once
-  across both thresholds), `build_candidate_retriever` (both the hybrid and the vector-only
+  across both thresholds), the retry policy on both network calls (retry-then-succeed,
+  reraise-on-exhaustion for each, and that the happy path adds no round-trip),
+  `build_candidate_retriever` (both the hybrid and the vector-only
   fallback branch), `stream_answer`, embedding/namespace agreement with `config`, and two
   structural guards: importing `rag` must construct no `MongoClient`, and must not load
   `langchain_community` (checked in a subprocess, since the ingest module is already in

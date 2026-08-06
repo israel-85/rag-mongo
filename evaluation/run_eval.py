@@ -12,12 +12,10 @@ retrieval "improvement" and a silent regression.
 import argparse
 import json
 import sys
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from pymongo import MongoClient
-from tenacity import Retrying, stop_after_attempt, wait_exponential
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -26,8 +24,6 @@ import rag
 from evaluation.metrics import QuestionResult, score_question, summarize
 
 GOLDEN_PATH = Path(__file__).resolve().parent / "golden.json"
-
-T = TypeVar("T")
 
 
 def load_golden(path: Path = GOLDEN_PATH) -> list[dict[str, Any]]:
@@ -49,33 +45,13 @@ def retrieved_pages(docs) -> list[int]:
     return [doc.metadata.get("page", MISSING_PAGE) for doc in docs]
 
 
-RETRY_ATTEMPTS = 8
-
-
-def with_backoff(fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-    """Run fn, retrying on API errors so a rate limit cannot void a whole run.
-
-    Each golden question costs two Voyage requests (one embedding, one rerank) and
-    the free tier allows three per minute, so 429s are routine here rather than
-    exceptional. Without this, question 4 of 22 aborts a run that takes fifteen
-    minutes to redo. Shared with calibrate.py, which pays the same toll.
-    """
-    for attempt in Retrying(
-        stop=stop_after_attempt(RETRY_ATTEMPTS),
-        wait=wait_exponential(multiplier=10, max=90),
-        reraise=True,
-    ):
-        with attempt:
-            return fn(*args, **kwargs)
-    raise AssertionError("unreachable: Retrying with reraise=True either returns or raises")
-
-
 def run(
     vector_store, reranker, golden: list[dict[str, Any]], verbose: bool = False
 ) -> list[QuestionResult]:
     results = []
     for entry in golden:
-        docs = with_backoff(rag.retrieve, vector_store, entry["question"], reranker)
+        # rag.retrieve retries its own network calls, so a 429 cannot void the run
+        docs = rag.retrieve(vector_store, entry["question"], reranker)
         result = score_question(entry["question"], entry["expected_pages"], retrieved_pages(docs))
         results.append(result)
         if verbose:

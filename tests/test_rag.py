@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pymongo
+import pytest
 from langchain_core.documents import Document
 from langchain_mongodb.retrievers.hybrid_search import MongoDBAtlasHybridSearchRetriever
 
@@ -278,6 +279,100 @@ class TestRetrieve:
         reranker = FakeReranker([(0, 0.99)])
 
         assert rag.retrieve(store, "q", reranker) == []
+
+
+class FlakyReranker(FakeReranker):
+    """Fails the first `failures` calls, then behaves like FakeReranker."""
+
+    def __init__(self, scored, failures: int):
+        super().__init__(scored)
+        self.failures = failures
+
+    def rerank(self, query, documents, model, top_k):
+        self.calls.append({"query": query, "documents": documents})
+        if len(self.calls) <= self.failures:
+            raise RuntimeError("429 rate limit exceeded")
+        return FakeRerankResponse([FakeRerankResult(i, s) for i, s in self.scored])
+
+
+class TestRetryPolicy:
+    """A 429 from Voyage's 3-requests-per-minute tier is routine, not exceptional.
+
+    Every test zeroes the wait multiplier - otherwise the suite would sit through a
+    real exponential backoff, and a slow test suite stops being run.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_sleeping(self, monkeypatch):
+        monkeypatch.setattr(rag, "RETRIEVE_RETRY_WAIT_MULTIPLIER", 0)
+
+    def _vector_store(self, docs):
+        store = _store_with_indexes(rag.INDEX_NAME)
+        store.as_retriever.return_value.invoke.return_value = docs
+        return store
+
+    def test_retries_a_rate_limited_rerank_and_succeeds(self):
+        """One 429 must not end a query the user is waiting on."""
+        reranker = FlakyReranker([(0, 0.9)], failures=1)
+
+        scored = rag.score_candidates("q", _docs("a"), reranker)
+
+        assert [score for _, score in scored] == [0.9]
+        assert len(reranker.calls) == 2
+
+    def test_retries_a_failing_atlas_query_and_succeeds(self):
+        docs = _docs("a", "b")
+        store = self._vector_store(docs)
+        store.as_retriever.return_value.invoke.side_effect = [
+            RuntimeError("connection reset"),
+            docs,
+        ]
+        reranker = FakeReranker([(1, 0.9)])
+
+        result = rag.retrieve(store, "q", reranker)
+
+        assert [d.page_content for d in result] == ["b"]
+        assert store.as_retriever.return_value.invoke.call_count == 2
+
+    def test_reraises_a_permanently_failing_rerank(self):
+        """Exhausted retries must raise, never return [].
+
+        Returning [] would make "the reranker is down" indistinguishable from "the
+        corpus cannot answer this", and main() would print NO_CONTEXT_MESSAGE over a
+        broken pipeline.
+        """
+        reranker = FlakyReranker([(0, 0.9)], failures=rag.RETRIEVE_MAX_ATTEMPTS)
+
+        with pytest.raises(RuntimeError, match="429"):
+            rag.score_candidates("q", _docs("a"), reranker)
+
+        assert len(reranker.calls) == rag.RETRIEVE_MAX_ATTEMPTS
+
+    def test_reraises_a_permanently_failing_atlas_query(self):
+        store = self._vector_store(_docs("a"))
+        store.as_retriever.return_value.invoke.side_effect = RuntimeError("no primary")
+
+        with pytest.raises(RuntimeError, match="no primary"):
+            rag.retrieve(store, "q", FakeReranker([(0, 0.9)]))
+
+        assert store.as_retriever.return_value.invoke.call_count == rag.RETRIEVE_MAX_ATTEMPTS
+
+    def test_spends_no_retry_budget_when_there_are_no_candidates(self):
+        """The empty guard sits above the retry - a call that never happens cannot fail."""
+        reranker = FlakyReranker([], failures=rag.RETRIEVE_MAX_ATTEMPTS)
+
+        assert rag.score_candidates("q", [], reranker) == []
+        assert reranker.calls == []
+
+    def test_a_healthy_query_calls_each_service_once(self):
+        """Backoff must be invisible on the happy path, not an extra round-trip."""
+        store = self._vector_store(_docs("a"))
+        reranker = FakeReranker([(0, 0.9)])
+
+        rag.retrieve(store, "q", reranker)
+
+        assert store.as_retriever.return_value.invoke.call_count == 1
+        assert len(reranker.calls) == 1
 
 
 def test_resolve_query_prefers_cli_argument():

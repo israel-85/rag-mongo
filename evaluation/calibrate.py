@@ -37,7 +37,7 @@ def top_score(vector_store, query: str, reranker) -> float:
     rather than reused from rag.retrieve because calibration wants top_k=1, so it
     borrows rag's retry policy to get the same protection.
     """
-    candidates = rag._retryer()(rag.build_candidate_retriever(vector_store).invoke, query)
+    candidates = rag.retryer()(rag.build_candidate_retriever(vector_store).invoke, query)
     scored = rag.score_candidates(query, candidates, reranker, top_k=1)
     return max((score for _, score in scored), default=0.0)
 

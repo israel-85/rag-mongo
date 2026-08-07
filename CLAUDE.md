@@ -136,14 +136,19 @@ Same convention: pure functions at top level, all I/O in `main()` behind `if __n
    re-scoring, since rerank scores are deterministic and a second call would pay twice for an
    identical answer. The second chance is about the gate being strict, never the net being small.
 
-   Both network calls — the Atlas candidate query and the Voyage rerank — go through `_retryer()`
+   Both network calls — the Atlas candidate query and the Voyage rerank — go through `retryer()`
    (`RETRIEVE_MAX_ATTEMPTS=8`, exponential to 90s), with `_report_retry` printing each attempt so a
    rate limit reads as a slow answer rather than a hang. A query costs two Voyage requests against
-   a 3 RPM free tier, so a 429 is the routine failure, not the exceptional one. `reraise=True` is
-   load-bearing: swallowing an exhausted retry would return no documents, making "retrieval is
-   broken" indistinguishable from "the corpus has no answer" — the exact silent failure
-   `NO_CONTEXT_MESSAGE` exists to make loud. Retriever *construction* stays outside the retry,
-   being a cached index lookup rather than the flaky part.
+   a 3 RPM free tier, so a 429 is the routine failure, not the exceptional one. Only `RETRYABLE_ERRORS`
+   (Voyage rate-limit/timeout/connection/server errors, pymongo connection-loss errors) trigger a
+   retry — a bad API key or a malformed query fails on the first attempt instead of being retried
+   for ~4.5 minutes and misread as a rate limit. `reraise=True` is load-bearing: swallowing an
+   exhausted retry would return no documents, making "retrieval is broken" indistinguishable from
+   "the corpus has no answer" — the exact silent failure `NO_CONTEXT_MESSAGE` exists to make loud.
+   Retriever *construction* stays outside the retry, being a cached index lookup rather than the
+   flaky part. `retryer()` has no leading underscore: `evaluation/calibrate.py` needs the identical
+   policy for a `top_k=1` query shape `retrieve()` doesn't support, and a private name would mark
+   that as reaching into an implementation detail rather than a shared one.
 
    Three deliberate deletions from the old design, all of which cost recall:
    - **No `score_threshold` at the vector stage.** Gating there caps what the reranker can ever

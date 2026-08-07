@@ -2,7 +2,9 @@ import sys
 from collections.abc import Iterable, Sequence
 from typing import Any, TextIO
 
+import pymongo.errors
 import voyageai
+import voyageai.error
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
@@ -12,7 +14,12 @@ from langchain_openai import ChatOpenAI
 from langchain_voyageai import VoyageAIEmbeddings
 from pydantic import SecretStr
 from pymongo import MongoClient
-from tenacity import Retrying, stop_after_attempt, wait_exponential
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 import key_param
 from config import (
@@ -123,6 +130,25 @@ RETRIEVE_MAX_ATTEMPTS = 8
 RETRIEVE_RETRY_WAIT_MULTIPLIER = 10
 RETRIEVE_RETRY_MAX_WAIT_SECONDS = 90
 
+# Only these are worth retrying. Voyage separates transient failures (rate limits,
+# timeouts, its own outages) from ones that will never succeed on a second try
+# (bad key, malformed request) - retrying the latter would turn an instant, readable
+# error into an 8-attempt, ~4.5-minute wait that still ends in the same failure.
+# pymongo's equivalents cover connection loss and a cluster mid-election, not a
+# query error like a bad filter.
+RETRYABLE_ERRORS = (
+    voyageai.error.RateLimitError,
+    voyageai.error.ServiceUnavailableError,
+    voyageai.error.APIConnectionError,
+    voyageai.error.Timeout,
+    voyageai.error.TryAgain,
+    voyageai.error.ServerError,
+    pymongo.errors.ConnectionFailure,
+    pymongo.errors.ServerSelectionTimeoutError,
+    pymongo.errors.ExecutionTimeout,
+    pymongo.errors.NotPrimaryError,
+)
+
 
 def _report_retry(state: Any) -> None:
     """Say why the answer is slow, so a rate limit is visible rather than a hang.
@@ -139,24 +165,33 @@ def _report_retry(state: Any) -> None:
     )
 
 
-def _retryer() -> Retrying:
-    """A fresh backoff policy per call.
+def retryer() -> Retrying:
+    """A fresh backoff policy per call, shared by rag.py and evaluation/calibrate.py.
+
+    Public (no leading underscore) because calibrate.py needs the exact same policy
+    for a query shape retrieve() doesn't support (top_k=1) - a private name would
+    mark that cross-module call as reaching into an implementation detail it isn't.
 
     Fresh rather than a module-level singleton for two reasons: a Retrying instance
     carries per-run state, and building it here means the wait constants are read at
     call time - which is what lets tests set the multiplier to 0 instead of sleeping
     through a real 90-second backoff.
 
-    reraise=True so an exhausted retry surfaces the original error. Swallowing it
-    would return no documents, and "retrieval is broken" would become indistinguishable
-    from "the corpus has no answer" - the exact silent failure NO_CONTEXT_MESSAGE exists
-    to make loud.
+    retry=retry_if_exception_type(RETRYABLE_ERRORS) so only transient failures pay
+    the backoff; anything else (bad API key, programming error) surfaces immediately
+    instead of being retried for several minutes and misreported as a rate limit.
+
+    reraise=True so an exhausted retryable failure surfaces the original error.
+    Swallowing it would return no documents, and "retrieval is broken" would become
+    indistinguishable from "the corpus has no answer" - the exact silent failure
+    NO_CONTEXT_MESSAGE exists to make loud.
     """
     return Retrying(
         stop=stop_after_attempt(RETRIEVE_MAX_ATTEMPTS),
         wait=wait_exponential(
             multiplier=RETRIEVE_RETRY_WAIT_MULTIPLIER, max=RETRIEVE_RETRY_MAX_WAIT_SECONDS
         ),
+        retry=retry_if_exception_type(RETRYABLE_ERRORS),
         before_sleep=_report_retry,
         reraise=True,
     )
@@ -254,7 +289,7 @@ def score_candidates(
     if not docs:
         return []
 
-    response = _retryer()(
+    response = retryer()(
         reranker.rerank,
         query,
         [doc.page_content for doc in docs],
@@ -294,13 +329,13 @@ def retrieve(
     net being too small - and re-scoring to lower a floor would pay twice for an
     identical answer.
 
-    Both network calls retry with backoff (see _retryer). Retriever construction stays
+    Both network calls retry with backoff (see retryer). Retriever construction stays
     outside the retry: it is a cached index lookup, not the flaky part.
 
     The eval harness calls this, not main(), so what is measured is what runs - and
     since the backoff now lives here, the harness inherits it instead of wrapping it.
     """
-    candidates = _retryer()(build_candidate_retriever(vector_store).invoke, query)
+    candidates = retryer()(build_candidate_retriever(vector_store).invoke, query)
     scored = score_candidates(query, candidates, reranker)
 
     for threshold in (RERANK_THRESHOLD, RELAXED_RERANK_THRESHOLD):

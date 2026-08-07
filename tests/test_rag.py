@@ -6,7 +6,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pymongo
+import pymongo.errors
 import pytest
+import voyageai.error
 from langchain_core.documents import Document
 from langchain_mongodb.retrievers.hybrid_search import MongoDBAtlasHybridSearchRetriever
 
@@ -282,16 +284,17 @@ class TestRetrieve:
 
 
 class FlakyReranker(FakeReranker):
-    """Fails the first `failures` calls, then behaves like FakeReranker."""
+    """Raises `error` on the first `failures` calls, then behaves like FakeReranker."""
 
-    def __init__(self, scored, failures: int):
+    def __init__(self, scored, failures: int, error: Exception | None = None):
         super().__init__(scored)
         self.failures = failures
+        self.error = error or voyageai.error.RateLimitError("rate limit exceeded")
 
     def rerank(self, query, documents, model, top_k):
         self.calls.append({"query": query, "documents": documents})
         if len(self.calls) <= self.failures:
-            raise RuntimeError("429 rate limit exceeded")
+            raise self.error
         return FakeRerankResponse([FakeRerankResult(i, s) for i, s in self.scored])
 
 
@@ -324,7 +327,7 @@ class TestRetryPolicy:
         docs = _docs("a", "b")
         store = self._vector_store(docs)
         store.as_retriever.return_value.invoke.side_effect = [
-            RuntimeError("connection reset"),
+            pymongo.errors.ConnectionFailure("connection reset"),
             docs,
         ]
         reranker = FakeReranker([(1, 0.9)])
@@ -343,16 +346,18 @@ class TestRetryPolicy:
         """
         reranker = FlakyReranker([(0, 0.9)], failures=rag.RETRIEVE_MAX_ATTEMPTS)
 
-        with pytest.raises(RuntimeError, match="429"):
+        with pytest.raises(voyageai.error.RateLimitError, match="rate limit"):
             rag.score_candidates("q", _docs("a"), reranker)
 
         assert len(reranker.calls) == rag.RETRIEVE_MAX_ATTEMPTS
 
     def test_reraises_a_permanently_failing_atlas_query(self):
         store = self._vector_store(_docs("a"))
-        store.as_retriever.return_value.invoke.side_effect = RuntimeError("no primary")
+        store.as_retriever.return_value.invoke.side_effect = pymongo.errors.ServerSelectionTimeoutError(
+            "no primary"
+        )
 
-        with pytest.raises(RuntimeError, match="no primary"):
+        with pytest.raises(pymongo.errors.ServerSelectionTimeoutError, match="no primary"):
             rag.retrieve(store, "q", FakeReranker([(0, 0.9)]))
 
         assert store.as_retriever.return_value.invoke.call_count == rag.RETRIEVE_MAX_ATTEMPTS
@@ -373,6 +378,32 @@ class TestRetryPolicy:
 
         assert store.as_retriever.return_value.invoke.call_count == 1
         assert len(reranker.calls) == 1
+
+    def test_does_not_retry_a_non_transient_error(self):
+        """A bad API key must fail in one call, not be retried for ~4.5 minutes.
+
+        Without a type filter this looked identical to a rate limit from the outside
+        - eight attempts of the same auth failure, printed as if it might resolve.
+        """
+        reranker = FlakyReranker(
+            [(0, 0.9)], failures=rag.RETRIEVE_MAX_ATTEMPTS, error=voyageai.error.AuthenticationError("bad key")
+        )
+
+        with pytest.raises(voyageai.error.AuthenticationError):
+            rag.score_candidates("q", _docs("a"), reranker)
+
+        assert len(reranker.calls) == 1
+
+    def test_does_not_retry_a_non_transient_atlas_error(self):
+        store = self._vector_store(_docs("a"))
+        store.as_retriever.return_value.invoke.side_effect = pymongo.errors.OperationFailure(
+            "bad filter"
+        )
+
+        with pytest.raises(pymongo.errors.OperationFailure):
+            rag.retrieve(store, "q", FakeReranker([(0, 0.9)]))
+
+        assert store.as_retriever.return_value.invoke.call_count == 1
 
 
 def test_resolve_query_prefers_cli_argument():
